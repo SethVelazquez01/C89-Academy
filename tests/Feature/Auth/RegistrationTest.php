@@ -1,25 +1,19 @@
 <?php
 
-use App\Models\User;
+test('public registration screen is unavailable', function () {
+    $response = $this->get('/register');
 
-test('registration screen can be rendered', function () {
-    $response = $this->get(route('register'));
-
-    $response->assertOk();
+    $response->assertNotFound();
 });
 
-test('new users can register', function () {
-    $response = $this->post(route('register.store'), [
+test('public registration endpoint is unavailable', function () {
+    $response = $this->post('/register', [
         'name' => 'John Doe',
         'email' => 'test@example.com',
         'password' => 'password',
         'password_confirmation' => 'password',
     ]);
 
-    $user = User::where('email', 'test@example.com')->first();
-
-    $response->assertSessionHasNoErrors()
-        ->assertRedirect(route('dashboard', absolute: false));
-
-    $this->assertAuthenticated();
+    $response->assertNotFound();
+    $this->assertGuest();
 });
