@@ -10,7 +10,7 @@ test('guests are redirected to the login page', function () {
     $response->assertRedirect(route('login'));
 });
 
-test('authenticated users can visit the dashboard', function () {
+test('authenticated users can visit their empty learning dashboard', function () {
     $user = User::factory()->create();
     $team = $user->currentTeam;
 
@@ -21,5 +21,9 @@ test('authenticated users can visit the dashboard', function () {
     $response
         ->assertOk()
         ->assertSee('Mi aprendizaje')
-        ->assertSee($team->name);
+        ->assertSee($team->name)
+        ->assertSee('Propietario')
+        ->assertSee('Aún no tienes cursos asignados')
+        ->assertSee('0%')
+        ->assertDontSee('Inducción C89');
 });
