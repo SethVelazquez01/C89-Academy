@@ -18,6 +18,18 @@
                         Mi aprendizaje
                     </flux:sidebar.item>
                 </flux:sidebar.group>
+                @can('create', \App\Models\Course::class)
+                    <flux:sidebar.group heading="Administración" class="grid">
+                         <flux:sidebar.item
+                            icon="book-open"
+                            :href="route('admin.courses.index')"
+                            :current="request()->routeIs('admin.courses.*')"
+                            wire:navigate
+                            >
+                        Cursos
+                    </flux:sidebar.item>
+                </flux:sidebar.group>
+                @endcan
             </flux:sidebar.nav>
 
             <flux:spacer />

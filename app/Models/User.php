@@ -32,6 +32,7 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Collection<int, Course> $createdCourses
+ * @property-read Collection<int, CourseEnrollment> $courseEnrollments
  * @property-read Team|null $currentTeam
  * @property-read Collection<int, Team> $ownedTeams
  * @property-read Collection<int, Membership> $teamMemberships
@@ -52,6 +53,16 @@ class User extends Authenticatable implements PasskeyUser
     public function createdCourses(): HasMany
     {
         return $this->hasMany(Course::class, 'created_by');
+    }
+
+    /**
+     * Get the user's course enrollments.
+     *
+     * @return HasMany<CourseEnrollment, $this>
+     */
+    public function courseEnrollments(): HasMany
+    {
+        return $this->hasMany(CourseEnrollment::class);
     }
 
     /**
