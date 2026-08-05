@@ -22,6 +22,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property Carbon|null $deleted_at
+ * @property-read Collection<int, Course> $courses
  * @property-read Collection<int, TeamInvitation> $invitations
  * @property-read Collection<int, Membership> $memberships
  * @property-read Collection<int, User> $members
@@ -60,6 +61,16 @@ class Team extends Model
         return $this->members()
             ->wherePivot('role', TeamRole::Owner->value)
             ->first();
+    }
+
+    /**
+     * Get the courses owned by this organization.
+     *
+     * @return HasMany<Course, $this>
+     */
+    public function courses(): HasMany
+    {
+        return $this->hasMany(Course::class);
     }
 
     /**
