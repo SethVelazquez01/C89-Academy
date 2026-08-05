@@ -18,5 +18,8 @@ test('authenticated users can visit the dashboard', function () {
         ->actingAs($user)
         ->get(route('dashboard'));
 
-    $response->assertOk();
+    $response
+        ->assertOk()
+        ->assertSee('Mi aprendizaje')
+        ->assertSee($team->name);
 });
