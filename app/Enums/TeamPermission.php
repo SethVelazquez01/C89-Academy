@@ -13,4 +13,9 @@ enum TeamPermission: string
 
     case CreateInvitation = 'invitation:create';
     case CancelInvitation = 'invitation:cancel';
+
+    case CreateCourse = 'course:create';
+    case UpdateCourse = 'course:update';
+    case PublishCourse = 'course:publish';
+    case DeleteCourse = 'course:delete';
 }

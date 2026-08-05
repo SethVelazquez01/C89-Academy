@@ -26,7 +26,7 @@
                         Este es tu espacio para continuar tu capacitación y consultar tus avances.
                     </p>
 
-                    <div class="mt-6 inline-flex min-w-64 items-center gap-3 rounded-xl border border-white/15 bg-white/10 p-4 backdrop-blur">
+                    <div class="mt-6 inline-flex min-w-64 items-center gap-3 rounded-xl p-4 backdrop-blur">
                         <div class="flex size-10 items-center justify-center rounded-lg bg-white p-1.5">
                             <img src="/images/brand/c89-logo.png" alt="" class="size-full object-contain" />
                         </div>
@@ -38,7 +38,7 @@
                     </div>
                 </div>
 
-                <div class="hidden overflow-hidden rounded-2xl border border-white/15 bg-white/10 shadow-2xl md:block">
+                <div class="hidden overflow-hidden rounded-2xl md:block">
                     <img
                         src="/images/brand/c89-mascot.png"
                         alt="Mascota de C89 dando la bienvenida"
