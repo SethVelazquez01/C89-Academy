@@ -2,8 +2,10 @@
 
 use App\Data\UserTeam;
 use App\Models\Team;
+use Flux\Flux;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Component;
 
 new class extends Component {
@@ -60,6 +62,13 @@ new class extends Component {
         $this->redirect($redirectTo ?? request()->header('Referer'), navigate: true);
     }
 
+    public function showCreateTeamModal(): void
+    {
+        Gate::authorize('create', Team::class);
+
+        Flux::modal('create-team-switcher')->show();
+    }
+
     protected function replaceCurrentTeamInReferer(string $referer, string $currentTeamSlug, string $newTeamSlug): ?string
     {
         $redirectTo = preg_replace(
@@ -111,11 +120,14 @@ new class extends Component {
             @if (Auth::user()->isPlatformOwner())
                 <flux:menu.separator />
 
-                <flux:modal.trigger name="create-team-switcher">
-                    <flux:menu.item icon="plus" class="cursor-pointer" data-test="team-switcher-new-team">
-                        {{ __('New team') }}
-                    </flux:menu.item>
-                </flux:modal.trigger>
+                <flux:menu.item
+                    icon="plus"
+                    wire:click="showCreateTeamModal"
+                    class="cursor-pointer"
+                    data-test="team-switcher-new-team"
+                >
+                    {{ __('New team') }}
+                </flux:menu.item>
             @endif
         </flux:menu>
     </flux:dropdown>
