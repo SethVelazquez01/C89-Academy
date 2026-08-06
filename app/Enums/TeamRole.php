@@ -47,12 +47,11 @@ enum TeamRole: string
      */
     public function hasPermission(TeamPermission $permission): bool
     {
-        return in_array($permission, $this->permissions());
+        return in_array($permission, $this->permissions(), true);
     }
 
     /**
      * Get the hierarchy level for this role.
-     * Higher numbers indicate higher privileges.
      */
     public function level(): int
     {
@@ -72,16 +71,38 @@ enum TeamRole: string
     }
 
     /**
-     * Get the roles that can be assigned to team members (excludes Owner).
+     * Get roles that may be assigned through organization member management.
      *
      * @return array<array{value: string, label: string}>
      */
     public static function assignable(): array
     {
-        return collect(self::cases())
-            ->filter(fn (self $role) => $role !== self::Owner)
+        return collect(self::assignableCases())
             ->map(fn (self $role) => ['value' => $role->value, 'label' => $role->label()])
             ->values()
             ->toArray();
+    }
+
+    /**
+     * Get assignable role values for server-side validation.
+     *
+     * @return array<string>
+     */
+    public static function assignableValues(): array
+    {
+        return array_map(
+            fn (self $role): string => $role->value,
+            self::assignableCases(),
+        );
+    }
+
+    /**
+     * The legacy tenant owner role cannot be granted through member forms.
+     *
+     * @return array<self>
+     */
+    private static function assignableCases(): array
+    {
+        return [self::Admin, self::Member];
     }
 }

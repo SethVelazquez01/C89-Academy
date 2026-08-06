@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\TeamRole;
 use App\Models\TeamInvitation;
 use Flux\Flux;
 use Illuminate\Support\Facades\Auth;
@@ -92,6 +93,12 @@ new class extends Component {
         if (Str::lower($invitation->email) !== Str::lower(Auth::user()->email)) {
             throw ValidationException::withMessages([
                 'invitation' => [__('This invitation was sent to a different email address.')],
+            ]);
+        }
+
+        if (! in_array($invitation->role->value, TeamRole::assignableValues(), true)) {
+            throw ValidationException::withMessages([
+                'invitation' => [__('This invitation contains an invalid role.')],
             ]);
         }
 

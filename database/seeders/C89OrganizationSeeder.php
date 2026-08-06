@@ -2,6 +2,8 @@
 
 namespace Database\Seeders;
 
+use App\Actions\Teams\CreateTeam;
+use App\Enums\PlatformRole;
 use App\Enums\TeamRole;
 use App\Models\Team;
 use App\Models\User;
@@ -17,6 +19,27 @@ class C89OrganizationSeeder extends Seeder
     {
         if (! app()->environment(['local', 'testing'])) {
             return;
+        }
+
+        $platformOwner = User::query()->firstOrCreate(
+            ['email' => 'owner@c89.com.mx'],
+            [
+                'name' => 'Owner C89 Academy',
+                'password' => Hash::make('password'),
+            ],
+        );
+
+        $platformOwner->forceFill([
+            'email_verified_at' => $platformOwner->email_verified_at ?? now(),
+            'platform_role' => PlatformRole::Owner,
+        ])->save();
+
+        if ($platformOwner->personalTeam() === null) {
+            app(CreateTeam::class)->handle(
+                $platformOwner,
+                $platformOwner->name."'s Team",
+                isPersonal: true,
+            );
         }
 
         $team = Team::query()

@@ -16,7 +16,7 @@ test('teams index page can be rendered', function () {
 });
 
 test('teams can be created', function () {
-    $user = User::factory()->create();
+    $user = User::factory()->platformOwner()->create();
 
     $this->actingAs($user);
 
@@ -32,7 +32,7 @@ test('teams can be created', function () {
 });
 
 test('team slug uses next available suffix', function () {
-    $user = User::factory()->create();
+    $user = User::factory()->platformOwner()->create();
 
     Team::factory()->create(['name' => 'Acme', 'slug' => 'acme']);
     Team::factory()->create(['name' => 'Acme One', 'slug' => 'acme-1']);
