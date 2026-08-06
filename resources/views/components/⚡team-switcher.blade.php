@@ -108,13 +108,15 @@ new class extends Component {
                 </flux:menu.item>
             @endforeach
 
-            <flux:menu.separator />
+            @if (Auth::user()->isPlatformOwner())
+                <flux:menu.separator />
 
-            <flux:modal.trigger name="create-team-switcher">
-                <flux:menu.item icon="plus" class="cursor-pointer" data-test="team-switcher-new-team">
-                    {{ __('New team') }}
-                </flux:menu.item>
-            </flux:modal.trigger>
+                <flux:modal.trigger name="create-team-switcher">
+                    <flux:menu.item icon="plus" class="cursor-pointer" data-test="team-switcher-new-team">
+                        {{ __('New team') }}
+                    </flux:menu.item>
+                </flux:modal.trigger>
+            @endif
         </flux:menu>
     </flux:dropdown>
 </div>

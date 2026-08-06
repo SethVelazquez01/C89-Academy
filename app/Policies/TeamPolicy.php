@@ -9,7 +9,7 @@ use App\Models\User;
 class TeamPolicy
 {
     /**
-     * Determine whether the user can view any models.
+     * Determine whether the user can view their organization list.
      */
     public function viewAny(User $user): bool
     {
@@ -17,7 +17,7 @@ class TeamPolicy
     }
 
     /**
-     * Determine whether the user can view the model.
+     * Determine whether the user can view the organization.
      */
     public function view(User $user, Team $team): bool
     {
@@ -25,15 +25,23 @@ class TeamPolicy
     }
 
     /**
-     * Determine whether the user can create models.
+     * Only the global platform owner can create real organizations.
      */
     public function create(User $user): bool
     {
-        return true;
+        return $user->isPlatformOwner();
     }
 
     /**
-     * Determine whether the user can update the model.
+     * Preserve one personal team per identity for framework compatibility.
+     */
+    public function createPersonal(User $user): bool
+    {
+        return $user->personalTeam() === null;
+    }
+
+    /**
+     * Determine whether the user can update the organization.
      */
     public function update(User $user, Team $team): bool
     {
@@ -41,7 +49,7 @@ class TeamPolicy
     }
 
     /**
-     * Determine whether the user can leave the team.
+     * Determine whether the user can leave the organization.
      */
     public function leave(User $user, Team $team): bool
     {
@@ -51,7 +59,7 @@ class TeamPolicy
     }
 
     /**
-     * Determine whether the user can add a member to the team.
+     * Determine whether the user can add a member to the organization.
      */
     public function addMember(User $user, Team $team): bool
     {
@@ -59,7 +67,7 @@ class TeamPolicy
     }
 
     /**
-     * Determine whether the user can update a member's role in the team.
+     * Determine whether the user can update an organization member.
      */
     public function updateMember(User $user, Team $team): bool
     {
@@ -67,7 +75,7 @@ class TeamPolicy
     }
 
     /**
-     * Determine whether the user can remove a member from the team.
+     * Determine whether the user can remove an organization member.
      */
     public function removeMember(User $user, Team $team): bool
     {
@@ -75,7 +83,7 @@ class TeamPolicy
     }
 
     /**
-     * Determine whether the user can invite members to the team.
+     * Determine whether the user can invite organization members.
      */
     public function inviteMember(User $user, Team $team): bool
     {
@@ -91,10 +99,11 @@ class TeamPolicy
     }
 
     /**
-     * Determine whether the user can delete the model.
+     * Determine whether the user can delete the organization.
      */
     public function delete(User $user, Team $team): bool
     {
-        return ! $team->is_personal && $user->hasTeamPermission($team, TeamPermission::DeleteTeam);
+        return ! $team->is_personal
+            && $user->hasTeamPermission($team, TeamPermission::DeleteTeam);
     }
 }

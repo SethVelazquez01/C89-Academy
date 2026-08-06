@@ -30,7 +30,7 @@ new class extends Component {
 
         $validated = $this->validate([
             'inviteEmail' => ['required', 'string', 'email', 'max:255', new UniqueTeamInvitation($this->team)],
-            'inviteRole' => ['required', 'string', Rule::enum(TeamRole::class)],
+            'inviteRole' => ['required', 'string', Rule::in(TeamRole::assignableValues())],
         ]);
 
         $invitation = $this->team->invitations()->create([

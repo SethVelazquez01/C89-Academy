@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\PlatformRole;
 use App\Enums\TeamRole;
 use App\Models\Team;
 use App\Models\User;
@@ -31,6 +32,7 @@ class UserFactory extends Factory
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
+            'platform_role' => null,
             'remember_token' => Str::random(10),
             'two_factor_secret' => null,
             'two_factor_recovery_codes' => null,
@@ -43,7 +45,7 @@ class UserFactory extends Factory
      */
     public function configure(): static
     {
-        return $this->afterCreating(function ($user) {
+        return $this->afterCreating(function (User $user) {
             $team = Team::factory()->personal()->create([
                 'name' => $user->name."'s Team",
             ]);
@@ -57,6 +59,16 @@ class UserFactory extends Factory
     }
 
     /**
+     * Indicate that the user is the global platform owner.
+     */
+    public function platformOwner(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'platform_role' => PlatformRole::Owner,
+        ]);
+    }
+
+    /**
      * Indicate that the model's email address should be unverified.
      */
     public function unverified(): static
@@ -67,7 +79,7 @@ class UserFactory extends Factory
     }
 
     /**
-     * Indicate that the model has two-factor authentication configured.
+     * Indicate that the user has two-factor authentication configured.
      */
     public function withTwoFactor(): static
     {

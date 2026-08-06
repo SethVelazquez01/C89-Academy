@@ -67,7 +67,7 @@ new class extends Component
         Gate::authorize('updateMember', $this->teamModel);
 
         $validated = Validator::make(['role' => $role], [
-            'role' => ['required', 'string', Rule::enum(TeamRole::class)],
+            'role' => ['required', 'string', Rule::in(TeamRole::assignableValues())],
         ])->validate();
 
         $this->teamModel->memberships()
