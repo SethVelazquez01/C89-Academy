@@ -49,6 +49,14 @@ class TeamPolicy
     }
 
     /**
+     * Allow only the global platform owner to update a real organization globally.
+     */
+    public function updateGlobally(User $user, Team $team): bool
+    {
+        return $user->isPlatformOwner() && ! $team->is_personal;
+    }
+
+    /**
      * Determine whether the user can leave the organization.
      */
     public function leave(User $user, Team $team): bool
@@ -105,5 +113,29 @@ class TeamPolicy
     {
         return ! $team->is_personal
             && $user->hasTeamPermission($team, TeamPermission::DeleteTeam);
+    }
+
+    /**
+     * Allow only the global platform owner to delete a real organization globally.
+     */
+    public function deleteGlobally(User $user, Team $team): bool
+    {
+        return $user->isPlatformOwner() && ! $team->is_personal;
+    }
+
+    /**
+     * Allow only the global platform owner to assign the first organization administrator.
+     */
+    public function assignAdministratorGlobally(User $user, Team $team): bool
+    {
+        return $user->isPlatformOwner() && ! $team->is_personal;
+    }
+
+    /**
+     * Allow only the global platform owner to cancel the initial admin invitation.
+     */
+    public function cancelAdministratorInvitationGlobally(User $user, Team $team): bool
+    {
+        return $user->isPlatformOwner() && ! $team->is_personal;
     }
 }

@@ -1,14 +1,21 @@
 <?php
 
+use App\Actions\Teams\CancelInitialOrganizationAdministratorInvitation;
 use App\Actions\Teams\CreateTeam;
+use App\Actions\Teams\DeleteOrganization;
+use App\Actions\Teams\InviteInitialOrganizationAdministrator;
+use App\Actions\Teams\UpdateOrganization;
 use App\Enums\PlatformRole;
 use App\Enums\TeamRole;
+use App\Models\Course;
 use App\Models\Team;
 use App\Models\TeamInvitation;
 use App\Models\User;
 use Database\Seeders\C89OrganizationSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 
 test('the global platform role is cast separately from organization membership', function () {
@@ -173,4 +180,387 @@ test('organization creation controls are hidden from regular users', function ()
     Livewire::actingAs($platformOwner)
         ->test('pages::teams.index')
         ->assertSeeHtml('data-test="teams-new-team-button"');
+});
+
+test('only the platform owner can open organization creation modals', function () {
+    $regularUser = User::factory()->create();
+    $platformOwner = User::factory()->platformOwner()->create();
+
+    Livewire::actingAs($regularUser)
+        ->test('pages::teams.index')
+        ->call('showCreateTeamModal')
+        ->assertForbidden();
+
+    Livewire::actingAs($regularUser)
+        ->test('team-switcher')
+        ->call('showCreateTeamModal')
+        ->assertForbidden();
+
+    Livewire::actingAs($platformOwner)
+        ->test('pages::teams.index')
+        ->call('showCreateTeamModal')
+        ->assertDispatched('modal-show');
+
+    Livewire::actingAs($platformOwner)
+        ->test('team-switcher')
+        ->call('showCreateTeamModal')
+        ->assertDispatched('modal-show');
+});
+
+test('the platform owner sees all real organizations without becoming a member', function () {
+    $platformOwner = User::factory()->platformOwner()->create();
+    $regularUser = User::factory()->create();
+    $organization = Team::factory()->create(['name' => 'Empresa visible']);
+
+    expect($platformOwner->belongsToTeam($organization))->toBeFalse();
+
+    Livewire::actingAs($platformOwner)
+        ->test('pages::teams.index')
+        ->assertSeeHtml('data-test="platform-organizations"')
+        ->assertSee('Empresa visible');
+
+    Livewire::actingAs($regularUser)
+        ->test('pages::teams.index')
+        ->assertDontSeeHtml('data-test="platform-organizations"')
+        ->assertDontSee('Empresa visible');
+});
+
+test('the platform owner can update a real organization globally without membership', function () {
+    $platformOwner = User::factory()->platformOwner()->create();
+    $organization = Team::factory()->create(['name' => 'Nombre anterior']);
+
+    $updatedOrganization = app(UpdateOrganization::class)->handle(
+        $platformOwner,
+        $organization,
+        'Nombre actualizado',
+    );
+
+    expect($updatedOrganization->name)->toBe('Nombre actualizado')
+        ->and($updatedOrganization->slug)->toBe('nombre-actualizado')
+        ->and($platformOwner->belongsToTeam($updatedOrganization))->toBeFalse();
+});
+
+test('tenant administrators cannot use global organization editing', function () {
+    $administrator = User::factory()->create();
+    $organization = Team::factory()->create(['name' => 'Empresa protegida']);
+
+    $organization->members()->attach($administrator, ['role' => TeamRole::Admin->value]);
+
+    expect(Gate::forUser($administrator)->allows('update', $organization))->toBeTrue()
+        ->and(Gate::forUser($administrator)->allows('updateGlobally', $organization))->toBeFalse();
+
+    expect(fn () => app(UpdateOrganization::class)->handle(
+        $administrator,
+        $organization,
+        'Intento manipulado',
+    ))->toThrow(AuthorizationException::class);
+
+    expect($organization->fresh()->name)->toBe('Empresa protegida');
+});
+
+test('the platform owner can edit an organization through the owner interface', function () {
+    $platformOwner = User::factory()->platformOwner()->create();
+    $organization = Team::factory()->create(['name' => 'Empresa editable']);
+
+    Livewire::actingAs($platformOwner)
+        ->test('pages::teams.index')
+        ->call('showEditOrganizationModal', $organization->id)
+        ->assertSet('editingOrganizationId', $organization->id)
+        ->assertSet('editingOrganizationName', 'Empresa editable')
+        ->assertDispatched('modal-show')
+        ->set('editingOrganizationName', 'Empresa corregida')
+        ->call('updateOrganization')
+        ->assertHasNoErrors();
+
+    expect($organization->fresh()->name)->toBe('Empresa corregida')
+        ->and($organization->fresh()->slug)->toBe('empresa-corregida');
+});
+
+test('a manipulated owner interface cannot edit organizations as a regular user', function () {
+    $regularUser = User::factory()->create();
+    $organization = Team::factory()->create(['name' => 'Empresa segura']);
+
+    Livewire::actingAs($regularUser)
+        ->test('pages::teams.index')
+        ->call('showEditOrganizationModal', $organization->id)
+        ->assertForbidden();
+
+    expect($organization->fresh()->name)->toBe('Empresa segura');
+});
+
+test('the platform owner can soft delete an empty real organization', function () {
+    $platformOwner = User::factory()->platformOwner()->create();
+    $organization = Team::factory()->create(['name' => 'Empresa vacía']);
+
+    app(DeleteOrganization::class)->handle($platformOwner, $organization);
+
+    $this->assertSoftDeleted('teams', ['id' => $organization->id]);
+    expect($platformOwner->belongsToTeam($organization))->toBeFalse();
+});
+
+test('the platform owner cannot delete a personal compatibility team globally', function () {
+    $platformOwner = User::factory()->platformOwner()->create();
+    $personalTeam = $platformOwner->teams()->where('is_personal', true)->firstOrFail();
+
+    expect(fn () => app(DeleteOrganization::class)->handle(
+        $platformOwner,
+        $personalTeam,
+    ))->toThrow(AuthorizationException::class);
+
+    expect($personalTeam->fresh())->not->toBeNull();
+});
+
+test('global organization deletion protects memberships courses and invitations', function () {
+    $platformOwner = User::factory()->platformOwner()->create();
+    $member = User::factory()->create();
+    $inviter = User::factory()->create();
+
+    $organizationWithMember = Team::factory()->create();
+    $organizationWithMember->members()->attach($member, ['role' => TeamRole::Member->value]);
+
+    $organizationWithCourse = Team::factory()->create();
+    Course::factory()->create(['team_id' => $organizationWithCourse->id]);
+
+    $organizationWithInvitation = Team::factory()->create();
+    TeamInvitation::factory()->create([
+        'team_id' => $organizationWithInvitation->id,
+        'invited_by' => $inviter->id,
+    ]);
+
+    foreach ([$organizationWithMember, $organizationWithCourse, $organizationWithInvitation] as $organization) {
+        expect(fn () => app(DeleteOrganization::class)->handle(
+            $platformOwner,
+            $organization,
+        ))->toThrow(ValidationException::class);
+
+        expect($organization->fresh())->not->toBeNull();
+    }
+});
+
+test('regular users cannot delete organizations through the global action or interface', function () {
+    $regularUser = User::factory()->create();
+    $organization = Team::factory()->create(['name' => 'Empresa protegida']);
+
+    expect(fn () => app(DeleteOrganization::class)->handle(
+        $regularUser,
+        $organization,
+    ))->toThrow(AuthorizationException::class);
+
+    Livewire::actingAs($regularUser)
+        ->test('pages::teams.index')
+        ->call('showDeleteOrganizationModal', $organization->id)
+        ->assertForbidden();
+
+    expect($organization->fresh())->not->toBeNull();
+});
+
+test('the platform owner can delete an empty organization through the owner interface', function () {
+    $platformOwner = User::factory()->platformOwner()->create();
+    $organization = Team::factory()->create(['name' => 'Empresa eliminable']);
+
+    Livewire::actingAs($platformOwner)
+        ->test('pages::teams.index')
+        ->call('showDeleteOrganizationModal', $organization->id)
+        ->assertSet('deletingOrganizationId', $organization->id)
+        ->assertSet('deletingOrganizationName', 'Empresa eliminable')
+        ->assertDispatched('modal-show')
+        ->call('deleteOrganization')
+        ->assertHasNoErrors();
+
+    $this->assertSoftDeleted('teams', ['id' => $organization->id]);
+});
+
+test('the platform owner can invite the first organization administrator without membership', function () {
+    Notification::fake();
+
+    $platformOwner = User::factory()->platformOwner()->create();
+    $organization = Team::factory()->create();
+
+    $invitation = app(InviteInitialOrganizationAdministrator::class)->handle(
+        $platformOwner,
+        $organization,
+        'ADMIN@EXAMPLE.COM',
+    );
+
+    expect($invitation->email)->toBe('admin@example.com')
+        ->and($invitation->role)->toBe(TeamRole::Admin)
+        ->and($invitation->invited_by)->toBe($platformOwner->id)
+        ->and($invitation->expires_at)->not->toBeNull()
+        ->and($platformOwner->belongsToTeam($organization))->toBeFalse();
+});
+
+test('an organization with an administrator or pending admin invitation rejects another initial assignment', function () {
+    $platformOwner = User::factory()->platformOwner()->create();
+    $administrator = User::factory()->create();
+
+    $organizationWithAdministrator = Team::factory()->create();
+    $organizationWithAdministrator->members()->attach($administrator, ['role' => TeamRole::Admin->value]);
+
+    $organizationWithPendingInvitation = Team::factory()->create();
+    TeamInvitation::factory()->create([
+        'team_id' => $organizationWithPendingInvitation->id,
+        'role' => TeamRole::Admin,
+        'invited_by' => $platformOwner->id,
+        'expires_at' => now()->addDay(),
+    ]);
+
+    foreach ([$organizationWithAdministrator, $organizationWithPendingInvitation] as $organization) {
+        expect(fn () => app(InviteInitialOrganizationAdministrator::class)->handle(
+            $platformOwner,
+            $organization,
+            'otro-admin@example.com',
+        ))->toThrow(ValidationException::class);
+    }
+});
+
+test('regular users cannot assign the initial organization administrator', function () {
+    $regularUser = User::factory()->create();
+    $organization = Team::factory()->create();
+
+    expect(fn () => app(InviteInitialOrganizationAdministrator::class)->handle(
+        $regularUser,
+        $organization,
+        'admin@example.com',
+    ))->toThrow(AuthorizationException::class);
+
+    Livewire::actingAs($regularUser)
+        ->test('pages::teams.index')
+        ->call('showAssignAdministratorModal', $organization->id)
+        ->assertForbidden();
+});
+
+test('the owner interface sends an initial administrator invitation', function () {
+    Notification::fake();
+
+    $platformOwner = User::factory()->platformOwner()->create();
+    $organization = Team::factory()->create(['name' => 'Empresa nueva']);
+
+    Livewire::actingAs($platformOwner)
+        ->test('pages::teams.index')
+        ->call('showAssignAdministratorModal', $organization->id)
+        ->assertSet('administratorOrganizationId', $organization->id)
+        ->assertSet('administratorOrganizationName', 'Empresa nueva')
+        ->assertDispatched('modal-show')
+        ->set('administratorEmail', 'nuevo-admin@example.com')
+        ->call('inviteInitialAdministrator')
+        ->assertHasNoErrors();
+
+    $this->assertDatabaseHas('team_invitations', [
+        'team_id' => $organization->id,
+        'email' => 'nuevo-admin@example.com',
+        'role' => TeamRole::Admin->value,
+        'invited_by' => $platformOwner->id,
+    ]);
+});
+
+test('accepting the initial administrator invitation creates only a tenant admin membership', function () {
+    Notification::fake();
+
+    $platformOwner = User::factory()->platformOwner()->create();
+    $administrator = User::factory()->create(['email' => 'admin@example.com']);
+    $organization = Team::factory()->create();
+
+    $invitation = app(InviteInitialOrganizationAdministrator::class)->handle(
+        $platformOwner,
+        $organization,
+        $administrator->email,
+    );
+
+    Livewire::actingAs($administrator)
+        ->test('pages::teams.pending-invitations-modal')
+        ->call('acceptInvitation', $invitation->code)
+        ->assertHasNoErrors();
+
+    expect($administrator->fresh()->teamRole($organization))->toBe(TeamRole::Admin)
+        ->and($administrator->fresh()->platform_role)->toBeNull()
+        ->and($platformOwner->belongsToTeam($organization))->toBeFalse();
+});
+
+test('the platform owner can cancel an unaccepted initial administrator invitation', function () {
+    $platformOwner = User::factory()->platformOwner()->create();
+    $organization = Team::factory()->create();
+
+    $invitation = app(InviteInitialOrganizationAdministrator::class)->handle(
+        $platformOwner,
+        $organization,
+        'admin@example.com',
+    );
+
+    app(CancelInitialOrganizationAdministratorInvitation::class)->handle(
+        $platformOwner,
+        $organization,
+        $invitation->code,
+    );
+
+    $this->assertDatabaseMissing('team_invitations', ['id' => $invitation->id]);
+});
+
+test('regular users cannot cancel initial administrator invitations', function () {
+    $platformOwner = User::factory()->platformOwner()->create();
+    $regularUser = User::factory()->create();
+    $organization = Team::factory()->create();
+
+    $invitation = app(InviteInitialOrganizationAdministrator::class)->handle(
+        $platformOwner,
+        $organization,
+        'admin@example.com',
+    );
+
+    expect(fn () => app(CancelInitialOrganizationAdministratorInvitation::class)->handle(
+        $regularUser,
+        $organization,
+        $invitation->code,
+    ))->toThrow(AuthorizationException::class);
+
+    Livewire::actingAs($regularUser)
+        ->test('pages::teams.index')
+        ->call('showCancelAdministratorInvitationModal', $organization->id)
+        ->assertForbidden();
+
+    $this->assertDatabaseHas('team_invitations', ['id' => $invitation->id]);
+});
+
+test('an initial administrator invitation cannot be canceled after an administrator exists', function () {
+    $platformOwner = User::factory()->platformOwner()->create();
+    $administrator = User::factory()->create();
+    $organization = Team::factory()->create();
+
+    $invitation = app(InviteInitialOrganizationAdministrator::class)->handle(
+        $platformOwner,
+        $organization,
+        'pending-admin@example.com',
+    );
+
+    $organization->members()->attach($administrator, ['role' => TeamRole::Admin->value]);
+
+    expect(fn () => app(CancelInitialOrganizationAdministratorInvitation::class)->handle(
+        $platformOwner,
+        $organization,
+        $invitation->code,
+    ))->toThrow(ValidationException::class);
+
+    $this->assertDatabaseHas('team_invitations', ['id' => $invitation->id]);
+});
+
+test('the owner interface can cancel the pending initial administrator invitation', function () {
+    $platformOwner = User::factory()->platformOwner()->create();
+    $organization = Team::factory()->create(['name' => 'Empresa pendiente']);
+
+    $invitation = app(InviteInitialOrganizationAdministrator::class)->handle(
+        $platformOwner,
+        $organization,
+        'admin-pendiente@example.com',
+    );
+
+    Livewire::actingAs($platformOwner)
+        ->test('pages::teams.index')
+        ->call('showCancelAdministratorInvitationModal', $organization->id)
+        ->assertSet('cancelingAdministratorInvitationOrganizationId', $organization->id)
+        ->assertSet('cancelingAdministratorInvitationCode', $invitation->code)
+        ->assertSet('cancelingAdministratorInvitationEmail', 'admin-pendiente@example.com')
+        ->assertDispatched('modal-show')
+        ->call('cancelInitialAdministratorInvitation')
+        ->assertHasNoErrors();
+
+    $this->assertDatabaseMissing('team_invitations', ['id' => $invitation->id]);
 });
