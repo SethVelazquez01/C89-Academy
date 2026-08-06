@@ -22,17 +22,17 @@ test('team member role can be updated by owner', function () {
     expect($team->members()->where('user_id', $member->id)->first()->pivot->role->value)->toEqual(TeamRole::Admin->value);
 });
 
-test('team member role cannot be updated by non owner', function () {
+test('team member role cannot be updated by a collaborator', function () {
     $owner = User::factory()->create();
-    $admin = User::factory()->create();
+    $collaborator = User::factory()->create();
     $member = User::factory()->create();
     $team = Team::factory()->create();
 
     $team->members()->attach($owner, ['role' => TeamRole::Owner->value]);
-    $team->members()->attach($admin, ['role' => TeamRole::Admin->value]);
+    $team->members()->attach($collaborator, ['role' => TeamRole::Member->value]);
     $team->members()->attach($member, ['role' => TeamRole::Member->value]);
 
-    $this->actingAs($admin);
+    $this->actingAs($collaborator);
 
     Livewire::test('pages::teams.edit', ['team' => $team])
         ->call('updateMember', $member->id, TeamRole::Admin->value)
@@ -57,20 +57,20 @@ test('team member can be removed by owner', function () {
     expect($member->fresh()->belongsToTeam($team))->toBeFalse();
 });
 
-test('team member cannot be removed by non owners', function () {
+test('team members cannot remove other members', function () {
     $owner = User::factory()->create();
-    $admin = User::factory()->create();
     $member = User::factory()->create();
+    $otherMember = User::factory()->create();
     $team = Team::factory()->create();
 
     $team->members()->attach($owner, ['role' => TeamRole::Owner->value]);
-    $team->members()->attach($admin, ['role' => TeamRole::Admin->value]);
     $team->members()->attach($member, ['role' => TeamRole::Member->value]);
+    $team->members()->attach($otherMember, ['role' => TeamRole::Member->value]);
 
-    $this->actingAs($admin);
+    $this->actingAs($member);
 
     Livewire::test('pages::teams.remove-member-modal', ['team' => $team])
-        ->set('memberId', $member->id)
+        ->set('memberId', $otherMember->id)
         ->call('removeMember')
         ->assertForbidden();
 });

@@ -2,6 +2,7 @@
 
 namespace App\Actions\Teams;
 
+use App\Enums\MembershipStatus;
 use App\Enums\TeamRole;
 use App\Models\Team;
 use App\Models\User;
@@ -25,6 +26,7 @@ class CancelInitialOrganizationAdministratorInvitation
 
             $hasAdministrator = $lockedOrganization->memberships()
                 ->whereIn('role', [TeamRole::Owner->value, TeamRole::Admin->value])
+                ->whereIn('status', [MembershipStatus::Active->value, MembershipStatus::Suspended->value])
                 ->exists();
 
             if ($hasAdministrator) {

@@ -1,9 +1,10 @@
 <?php
 
+use App\Actions\Teams\RemoveMembership;
 use App\Models\Team;
 use App\Models\User;
 use Flux\Flux;
-use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
 
 new class extends Component {
@@ -28,23 +29,15 @@ new class extends Component {
         $this->modalName = $modalName ?? ($memberId ? "remove-member-{$memberId}" : 'remove-member');
     }
 
-    public function removeMember(): void
+    public function removeMember(RemoveMembership $removeMembership): void
     {
-        Gate::authorize('removeMember', $this->team);
-
         $user = User::findOrFail($this->memberId);
 
         if ($this->memberName === '') {
             $this->memberName = $user->name;
         }
 
-        $this->team->memberships()
-            ->where('user_id', $user->id)
-            ->delete();
-
-        if ($user->isCurrentTeam($this->team)) {
-            $user->switchTeam($user->personalTeam());
-        }
+        $removeMembership->handle(Auth::user(), $this->team, $user);
 
         $this->dispatch('close-modal', name: $this->modalName);
 

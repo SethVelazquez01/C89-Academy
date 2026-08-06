@@ -1,6 +1,9 @@
 <?php
 
+use App\Enums\MembershipStatus;
 use App\Enums\TeamRole;
+use App\Models\Membership;
+use App\Models\Team;
 use App\Models\TeamInvitation;
 use Flux\Flux;
 use Illuminate\Support\Facades\Auth;
@@ -51,14 +54,50 @@ new class extends Component {
         $user = Auth::user();
 
         DB::transaction(function () use ($user, $invitation) {
-            $team = $invitation->team;
+            $lockedInvitation = TeamInvitation::query()
+                ->whereKey($invitation->id)
+                ->whereNull('accepted_at')
+                ->lockForUpdate()
+                ->firstOrFail();
 
-            $team->memberships()->firstOrCreate(
-                ['user_id' => $user->id],
-                ['role' => $invitation->role]
-            );
+            $team = Team::query()->lockForUpdate()->findOrFail($lockedInvitation->team_id);
 
-            $invitation->update(['accepted_at' => now()]);
+            $membership = Membership::query()
+                ->where('team_id', $team->id)
+                ->where('user_id', $user->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($membership && ! $membership->isRemoved()) {
+                throw ValidationException::withMessages([
+                    'invitation' => [__('You already have a current membership in this organization.')],
+                ]);
+            }
+
+            if ($membership) {
+                $updates = [
+                    'role' => $lockedInvitation->role,
+                    'status' => MembershipStatus::Active,
+                    'status_changed_by' => $lockedInvitation->invited_by,
+                    'status_changed_at' => now(),
+                ];
+
+                if ($membership->role !== $lockedInvitation->role) {
+                    $updates['role_changed_by'] = $lockedInvitation->invited_by;
+                    $updates['role_changed_at'] = now();
+                }
+
+                $membership->update($updates);
+            } else {
+                $team->memberships()->create([
+                    'user_id' => $user->id,
+                    'role' => $lockedInvitation->role,
+                    'status' => MembershipStatus::Active,
+                    'created_by' => $lockedInvitation->invited_by,
+                ]);
+            }
+
+            $lockedInvitation->update(['accepted_at' => now()]);
 
             $user->switchTeam($team);
         });

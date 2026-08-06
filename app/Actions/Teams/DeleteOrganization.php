@@ -2,6 +2,7 @@
 
 namespace App\Actions\Teams;
 
+use App\Enums\MembershipStatus;
 use App\Models\Team;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -22,7 +23,9 @@ class DeleteOrganization
 
             Gate::forUser($actor)->authorize('deleteGlobally', $lockedOrganization);
 
-            $hasDependencies = $lockedOrganization->memberships()->exists()
+            $hasDependencies = $lockedOrganization->memberships()
+                ->whereIn('status', [MembershipStatus::Active->value, MembershipStatus::Suspended->value])
+                ->exists()
                 || $lockedOrganization->courses()->withTrashed()->exists()
                 || $lockedOrganization->invitations()->exists()
                 || User::query()->where('current_team_id', $lockedOrganization->id)->exists();

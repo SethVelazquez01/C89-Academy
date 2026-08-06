@@ -3,6 +3,7 @@
 namespace App\Http\Responses\Concerns;
 
 use App\Models\Team;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\URL;
 
@@ -11,6 +12,8 @@ trait RedirectsToCurrentTeam
     protected function redirectPathForCurrentTeam(Request $request, string $redirect): string
     {
         $team = $this->currentTeam($request);
+
+        $request->session()->forget('url.intended');
 
         URL::defaults(['current_team' => $team->slug]);
 
@@ -21,11 +24,19 @@ trait RedirectsToCurrentTeam
     {
         $user = $request->user();
 
-        abort_if(! $user, 403);
+        abort_unless($user instanceof User, 403);
 
-        $team = $user->currentTeam ?? $user->personalTeam();
+        $team = $user->currentTeam;
+
+        if ($team && $user->belongsToTeam($team)) {
+            return $team;
+        }
+
+        $team = $user->fallbackTeam();
 
         abort_if(! $team, 403);
+
+        $user->switchTeam($team);
 
         return $team;
     }

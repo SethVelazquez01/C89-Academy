@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Actions\Teams\CreateTeam;
+use App\Enums\MembershipStatus;
 use App\Enums\PlatformRole;
 use App\Enums\TeamRole;
 use App\Models\Team;
@@ -83,8 +84,16 @@ class C89OrganizationSeeder extends Seeder
         ])->save();
 
         $team->members()->syncWithoutDetaching([
-            $administrator->id => ['role' => TeamRole::Admin->value],
-            $collaborator->id => ['role' => TeamRole::Member->value],
+            $administrator->id => [
+                'role' => TeamRole::Admin->value,
+                'status' => MembershipStatus::Active->value,
+                'created_by' => $platformOwner->id,
+            ],
+            $collaborator->id => [
+                'role' => TeamRole::Member->value,
+                'status' => MembershipStatus::Active->value,
+                'created_by' => $platformOwner->id,
+            ],
         ]);
 
         $administrator->switchTeam($team);

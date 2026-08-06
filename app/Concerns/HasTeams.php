@@ -4,6 +4,7 @@ namespace App\Concerns;
 
 use App\Data\TeamPermissions;
 use App\Data\UserTeam;
+use App\Enums\MembershipStatus;
 use App\Enums\TeamPermission;
 use App\Enums\TeamRole;
 use App\Models\Membership;
@@ -25,7 +26,16 @@ trait HasTeams
     public function teams(): BelongsToMany
     {
         return $this->belongsToMany(Team::class, 'team_members', 'user_id', 'team_id')
-            ->withPivot(['role'])
+            ->withPivot([
+                'role',
+                'status',
+                'created_by',
+                'status_changed_by',
+                'status_changed_at',
+                'role_changed_by',
+                'role_changed_at',
+            ])
+            ->wherePivot('status', MembershipStatus::Active->value)
             ->withTimestamps();
     }
 
@@ -43,7 +53,8 @@ trait HasTeams
             'id',
             'id',
             'team_id',
-        )->where('team_members.role', TeamRole::Owner->value);
+        )->where('team_members.role', TeamRole::Owner->value)
+            ->where('team_members.status', MembershipStatus::Active->value);
     }
 
     /**
@@ -124,6 +135,7 @@ trait HasTeams
     {
         return $this->teamMemberships()
             ->where('team_id', $team->id)
+            ->where('status', MembershipStatus::Active->value)
             ->first()
             ?->role;
     }
@@ -173,6 +185,7 @@ trait HasTeams
             canAddMember: $role?->hasPermission(TeamPermission::AddMember) ?? false,
             canUpdateMember: $role?->hasPermission(TeamPermission::UpdateMember) ?? false,
             canRemoveMember: $role?->hasPermission(TeamPermission::RemoveMember) ?? false,
+            canManageMemberStatus: $role?->hasPermission(TeamPermission::ManageMemberStatus) ?? false,
             canCreateInvitation: $role?->hasPermission(TeamPermission::CreateInvitation) ?? false,
             canCancelInvitation: $role?->hasPermission(TeamPermission::CancelInvitation) ?? false,
         );

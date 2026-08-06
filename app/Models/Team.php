@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Concerns\GeneratesUniqueTeamSlugs;
+use App\Enums\MembershipStatus;
 use App\Enums\TeamRole;
 use Database\Factories\TeamFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -82,7 +83,16 @@ class Team extends Model
     {
         return $this->belongsToMany(User::class, 'team_members', 'team_id', 'user_id')
             ->using(Membership::class)
-            ->withPivot(['role'])
+            ->withPivot([
+                'role',
+                'status',
+                'created_by',
+                'status_changed_by',
+                'status_changed_at',
+                'role_changed_by',
+                'role_changed_at',
+            ])
+            ->wherePivot('status', '!=', MembershipStatus::Removed->value)
             ->withTimestamps();
     }
 

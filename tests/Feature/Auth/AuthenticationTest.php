@@ -1,5 +1,7 @@
 <?php
 
+use App\Enums\TeamRole;
+use App\Models\Team;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Laravel\Fortify\Features;
@@ -24,6 +26,56 @@ test('users can authenticate using the login screen', function () {
         ->assertRedirect(route('dashboard', absolute: false));
 
     $this->assertAuthenticated();
+});
+
+test('collaborators ignore a stale intended admin url when logging in', function () {
+    $collaborator = User::factory()->create();
+    $team = Team::factory()->create();
+
+    $team->members()->attach($collaborator, ['role' => TeamRole::Member->value]);
+    $collaborator->switchTeam($team);
+
+    $response = $this
+        ->withSession([
+            'url.intended' => route('admin.courses.index', ['current_team' => $team]),
+        ])
+        ->post(route('login.store'), [
+            'email' => $collaborator->email,
+            'password' => 'password',
+        ]);
+
+    $response
+        ->assertSessionHasNoErrors()
+        ->assertSessionMissing('url.intended')
+        ->assertRedirect(route('dashboard', ['current_team' => $team], absolute: false));
+
+    $this->assertAuthenticatedAs($collaborator);
+});
+
+test('login repairs a current organization that no longer grants access', function () {
+    $collaborator = User::factory()->create();
+    $availableTeam = Team::factory()->create(['name' => 'A Academy']);
+    $unavailableTeam = Team::factory()->create(['name' => 'Unavailable Academy']);
+
+    $availableTeam->members()->attach($collaborator, ['role' => TeamRole::Member->value]);
+    $collaborator->forceFill(['current_team_id' => $unavailableTeam->id])->save();
+
+    $response = $this->post(route('login.store'), [
+        'email' => $collaborator->email,
+        'password' => 'password',
+    ]);
+
+    $collaborator->refresh();
+    $currentTeam = $collaborator->currentTeam;
+
+    assert($currentTeam instanceof Team);
+
+    $response
+        ->assertSessionHasNoErrors()
+        ->assertRedirect(route('dashboard', ['current_team' => $currentTeam], absolute: false));
+
+    expect($collaborator->belongsToTeam($currentTeam))->toBeTrue()
+        ->and($collaborator->current_team_id)->not->toBe($unavailableTeam->id);
 });
 
 test('passkey login response redirects to the current team dashboard', function () {

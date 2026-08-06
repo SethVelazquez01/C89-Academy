@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\MembershipStatus;
 use App\Enums\PlatformRole;
 use App\Enums\TeamRole;
 use App\Models\Team;
@@ -52,6 +53,8 @@ class UserFactory extends Factory
 
             $team->members()->attach($user, [
                 'role' => TeamRole::Owner->value,
+                'status' => MembershipStatus::Active->value,
+                'created_by' => $user->id,
             ]);
 
             $user->switchTeam($team);

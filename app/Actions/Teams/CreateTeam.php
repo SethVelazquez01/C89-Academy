@@ -2,6 +2,7 @@
 
 namespace App\Actions\Teams;
 
+use App\Enums\MembershipStatus;
 use App\Enums\TeamRole;
 use App\Models\Team;
 use App\Models\User;
@@ -30,6 +31,8 @@ class CreateTeam
                 $team->memberships()->create([
                     'user_id' => $user->id,
                     'role' => TeamRole::Owner,
+                    'status' => MembershipStatus::Active,
+                    'created_by' => $user->id,
                 ]);
 
                 $user->switchTeam($team);

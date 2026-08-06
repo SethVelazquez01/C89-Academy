@@ -1,15 +1,17 @@
 <?php
 
+use App\Actions\Teams\ChangeMembershipRole;
+use App\Actions\Teams\ChangeMembershipStatus;
 use App\Data\TeamPermissions;
+use App\Enums\MembershipStatus;
 use App\Enums\TeamRole;
 use App\Models\Team;
+use App\Models\User;
 use App\Rules\TeamName;
 use Flux\Flux;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -62,22 +64,52 @@ new class extends Component
         $this->redirectRoute('teams.edit', ['team' => $this->teamModel->fresh()->slug], navigate: true);
     }
 
-    public function updateMember(int $userId, string $role): void
+    public function updateMember(int $userId, string $role, ChangeMembershipRole $changeMembershipRole): void
     {
-        Gate::authorize('updateMember', $this->teamModel);
+        $member = User::findOrFail($userId);
 
-        $validated = Validator::make(['role' => $role], [
-            'role' => ['required', 'string', Rule::in(TeamRole::assignableValues())],
-        ])->validate();
-
-        $this->teamModel->memberships()
-            ->where('user_id', $userId)
-            ->firstOrFail()
-            ->update(['role' => TeamRole::from($validated['role'])]);
+        $changeMembershipRole->handle(
+            Auth::user(),
+            $this->teamModel,
+            $member,
+            $role,
+        );
 
         $this->populateTeamData();
 
         Flux::toast(variant: 'success', text: __('Member role updated.'));
+    }
+
+    public function suspendMember(int $userId, ChangeMembershipStatus $changeMembershipStatus): void
+    {
+        $member = User::findOrFail($userId);
+
+        $changeMembershipStatus->handle(
+            Auth::user(),
+            $this->teamModel,
+            $member,
+            MembershipStatus::Suspended,
+        );
+
+        $this->populateTeamData();
+
+        Flux::toast(variant: 'success', text: __('Member suspended.'));
+    }
+
+    public function reactivateMember(int $userId, ChangeMembershipStatus $changeMembershipStatus): void
+    {
+        $member = User::findOrFail($userId);
+
+        $changeMembershipStatus->handle(
+            Auth::user(),
+            $this->teamModel,
+            $member,
+            MembershipStatus::Active,
+        );
+
+        $this->populateTeamData();
+
+        Flux::toast(variant: 'success', text: __('Member reactivated.'));
     }
 
     private function populateTeamData(): void
@@ -101,6 +133,9 @@ new class extends Component
             'initials' => $member->initials(),
             'role' => $member->pivot->role->value,
             'role_label' => $member->pivot->role->label(),
+            'status' => $member->pivot->status->value,
+            'status_label' => $member->pivot->status->label(),
+            'is_self' => $member->id === $user->id,
         ])->toArray();
 
         $this->invitations = $team->invitations()
@@ -182,7 +217,13 @@ new class extends Component
 
                 <div class="space-y-3">
                     @foreach ($members as $member)
-                        <div class="flex items-center justify-between rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900" data-test="member-row">
+                        <div
+                            @class([
+                                'flex items-center justify-between rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900',
+                                'opacity-70' => $member['status'] === 'suspended',
+                            ])
+                            data-test="member-row"
+                        >
                             <div class="flex items-center gap-4">
                                 <flux:avatar :name="$member['name']" :initials="$member['initials']" />
                                 <div>
@@ -192,7 +233,11 @@ new class extends Component
                             </div>
 
                             <div class="flex items-center gap-2">
-                                @if ($member['role'] !== 'owner' && $this->permissions->canUpdateMember)
+                                <flux:badge :color="$member['status'] === 'active' ? 'green' : 'amber'" data-test="member-status-badge">
+                                    {{ $member['status_label'] }}
+                                </flux:badge>
+
+                                @if ($member['role'] !== 'owner' && ! $member['is_self'] && $this->permissions->canUpdateMember)
                                     <flux:dropdown position="bottom" align="end">
                                         <flux:button variant="outline" size="sm" icon:trailing="chevron-down" data-test="member-role-trigger">
                                             {{ $member['role_label'] }}
@@ -214,7 +259,32 @@ new class extends Component
                                     <flux:badge color="zinc">{{ $member['role_label'] }}</flux:badge>
                                 @endif
 
-                                @if ($member['role'] !== 'owner' && $this->permissions->canRemoveMember)
+                                @if ($member['role'] !== 'owner' && ! $member['is_self'] && $this->permissions->canManageMemberStatus)
+                                    @if ($member['status'] === 'active')
+                                        <flux:modal.trigger name="suspend-member-{{ $member['id'] }}">
+                                            <flux:tooltip :content="__('Suspend member')">
+                                                <flux:button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    icon="pause-circle"
+                                                    data-test="member-suspend-button"
+                                                />
+                                            </flux:tooltip>
+                                        </flux:modal.trigger>
+                                    @elseif ($member['status'] === 'suspended')
+                                        <flux:tooltip :content="__('Reactivate member')">
+                                            <flux:button
+                                                variant="ghost"
+                                                size="sm"
+                                                icon="play-circle"
+                                                wire:click="reactivateMember({{ $member['id'] }})"
+                                                data-test="member-reactivate-button"
+                                            />
+                                        </flux:tooltip>
+                                    @endif
+                                @endif
+
+                                @if ($member['role'] !== 'owner' && ! $member['is_self'] && $this->permissions->canRemoveMember)
                                     <flux:modal.trigger name="remove-member-{{ $member['id'] }}">
                                         <flux:tooltip :content="__('Remove member')">
                                             <flux:button
@@ -229,7 +299,30 @@ new class extends Component
                             </div>
                         </div>
 
-                        @if ($member['role'] !== 'owner' && $this->permissions->canRemoveMember)
+                        @if ($member['role'] !== 'owner' && ! $member['is_self'] && $this->permissions->canManageMemberStatus && $member['status'] === 'active')
+                            <flux:modal name="suspend-member-{{ $member['id'] }}" focusable class="max-w-lg">
+                                <form wire:submit="suspendMember({{ $member['id'] }})" class="space-y-6">
+                                    <div>
+                                        <flux:heading size="lg">{{ __('Suspend member') }}</flux:heading>
+                                        <flux:subheading>
+                                            {{ __('Suspend :name? They will lose access to this organization until reactivated.', ['name' => $member['name']]) }}
+                                        </flux:subheading>
+                                    </div>
+
+                                    <div class="flex justify-end space-x-2 rtl:space-x-reverse">
+                                        <flux:modal.close>
+                                            <flux:button variant="filled">{{ __('Cancel') }}</flux:button>
+                                        </flux:modal.close>
+
+                                        <flux:button variant="danger" type="submit" data-test="member-suspend-confirm">
+                                            {{ __('Suspend member') }}
+                                        </flux:button>
+                                    </div>
+                                </form>
+                            </flux:modal>
+                        @endif
+
+                        @if ($member['role'] !== 'owner' && ! $member['is_self'] && $this->permissions->canRemoveMember)
                             <livewire:pages::teams.remove-member-modal
                                 :team="$teamModel"
                                 :member-id="$member['id']"

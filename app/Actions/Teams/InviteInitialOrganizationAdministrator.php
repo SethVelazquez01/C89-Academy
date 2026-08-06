@@ -2,6 +2,7 @@
 
 namespace App\Actions\Teams;
 
+use App\Enums\MembershipStatus;
 use App\Enums\TeamRole;
 use App\Models\Team;
 use App\Models\TeamInvitation;
@@ -29,6 +30,7 @@ class InviteInitialOrganizationAdministrator
 
             $hasAdministrator = $lockedOrganization->memberships()
                 ->whereIn('role', [TeamRole::Owner->value, TeamRole::Admin->value])
+                ->whereIn('status', [MembershipStatus::Active->value, MembershipStatus::Suspended->value])
                 ->exists();
 
             $hasPendingAdministratorInvitation = $lockedOrganization->invitations()
