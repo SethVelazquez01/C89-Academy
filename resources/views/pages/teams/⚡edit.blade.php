@@ -2,8 +2,12 @@
 
 use App\Actions\Teams\ChangeMembershipRole;
 use App\Actions\Teams\ChangeMembershipStatus;
+use App\Actions\Teams\CreateSeatIncreaseRequest;
+use App\Actions\Teams\ProvisionOrganizationUser;
 use App\Data\TeamPermissions;
 use App\Enums\MembershipStatus;
+use App\Enums\OrganizationSeatType;
+use App\Enums\SeatIncreaseRequestStatus;
 use App\Enums\TeamRole;
 use App\Models\Team;
 use App\Models\User;
@@ -12,6 +16,8 @@ use Flux\Flux;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -28,6 +34,24 @@ new class extends Component
     public array $invitations = [];
 
     public array $availableRoles = [];
+
+    public array $seatUsage = [];
+
+    public ?array $pendingSeatIncreaseRequest = null;
+
+    public array $seatIncreaseRequestHistory = [];
+
+    public string $requestedAdministratorSeats = '0';
+
+    public string $requestedCollaboratorSeats = '0';
+
+    public string $seatIncreaseJustification = '';
+
+    public string $newUserName = '';
+
+    public string $newUserEmail = '';
+
+    public string $newUserRole = 'member';
 
     public bool $isCurrentTeam = false;
 
@@ -112,6 +136,88 @@ new class extends Component
         Flux::toast(variant: 'success', text: __('Member reactivated.'));
     }
 
+    public function requestAdditionalSeats(CreateSeatIncreaseRequest $createSeatIncreaseRequest): void
+    {
+        $validated = $this->validate([
+            'requestedAdministratorSeats' => ['required', 'integer', 'min:0', 'max:100000'],
+            'requestedCollaboratorSeats' => ['required', 'integer', 'min:0', 'max:100000'],
+            'seatIncreaseJustification' => ['required', 'string', 'min:10', 'max:1000'],
+        ], [
+            'requestedAdministratorSeats.integer' => 'Los cupos de administradores deben ser un número entero.',
+            'requestedAdministratorSeats.min' => 'Los cupos de administradores no pueden ser negativos.',
+            'requestedCollaboratorSeats.integer' => 'Los cupos de colaboradores deben ser un número entero.',
+            'requestedCollaboratorSeats.min' => 'Los cupos de colaboradores no pueden ser negativos.',
+            'seatIncreaseJustification.required' => 'La justificación es obligatoria.',
+            'seatIncreaseJustification.min' => 'La justificación debe tener al menos 10 caracteres.',
+        ]);
+
+        $createSeatIncreaseRequest->handle(
+            Auth::user(),
+            $this->teamModel,
+            (int) $validated['requestedAdministratorSeats'],
+            (int) $validated['requestedCollaboratorSeats'],
+            $validated['seatIncreaseJustification'],
+        );
+
+        Flux::modal('request-additional-seats')->close();
+
+        $this->reset(
+            'requestedAdministratorSeats',
+            'requestedCollaboratorSeats',
+            'seatIncreaseJustification',
+        );
+        $this->requestedAdministratorSeats = '0';
+        $this->requestedCollaboratorSeats = '0';
+
+        $this->populateTeamData();
+
+        Flux::toast(variant: 'success', text: 'Solicitud de cupos enviada.');
+    }
+
+    public function createOrganizationUser(ProvisionOrganizationUser $provisionOrganizationUser): void
+    {
+        $validated = $this->validate([
+            'newUserName' => ['required', 'string', 'max:255'],
+            'newUserEmail' => ['required', 'string', 'email', 'max:255'],
+            'newUserRole' => ['required', 'string', Rule::in(TeamRole::assignableValues())],
+        ], [
+            'newUserName.required' => 'El nombre es obligatorio.',
+            'newUserName.max' => 'El nombre no puede superar 255 caracteres.',
+            'newUserEmail.required' => 'El correo electrónico es obligatorio.',
+            'newUserEmail.email' => 'El correo electrónico no tiene un formato válido.',
+            'newUserRole.in' => 'El rol seleccionado no es válido.',
+        ]);
+
+        try {
+            $provisionOrganizationUser->handle(
+                Auth::user(),
+                $this->teamModel,
+                $validated['newUserName'],
+                $validated['newUserEmail'],
+                $validated['newUserRole'],
+            );
+        } catch (ValidationException $exception) {
+            $errors = $exception->errors();
+
+            throw ValidationException::withMessages([
+                'newUserName' => $errors['name'] ?? [],
+                'newUserEmail' => $errors['email'] ?? [],
+                'newUserRole' => $errors['role'] ?? [],
+            ]);
+        }
+
+        Flux::modal('create-organization-user')->close();
+
+        $this->reset('newUserName', 'newUserEmail', 'newUserRole');
+        $this->newUserRole = TeamRole::Member->value;
+        $this->populateTeamData();
+
+        Flux::toast(
+            variant: 'success',
+            text: 'Usuario agregado. Si la identidad es nueva, recibirá un correo para establecer su contraseña.',
+        );
+    }
+
     private function populateTeamData(): void
     {
         $user = Auth::user();
@@ -140,6 +246,9 @@ new class extends Component
 
         $this->invitations = $team->invitations()
             ->whereNull('accepted_at')
+            ->where(fn ($query) => $query
+                ->whereNull('expires_at')
+                ->orWhere('expires_at', '>=', now()))
             ->get()
             ->map(fn ($invitation) => [
                 'code' => $invitation->code,
@@ -150,6 +259,65 @@ new class extends Component
             ])->toArray();
 
         $this->availableRoles = TeamRole::assignable();
+
+        $this->seatUsage = collect(OrganizationSeatType::cases())
+            ->mapWithKeys(fn (OrganizationSeatType $seatType) => [
+                $seatType->value => [
+                    'label' => $seatType->pluralLabel(),
+                    'capacity' => $team->seatCapacity($seatType),
+                    'occupied' => $team->occupiedSeats($seatType),
+                    'available' => $team->availableSeats($seatType),
+                    'included' => $seatType === OrganizationSeatType::Administrator
+                        ? $team->included_administrator_seats
+                        : $team->included_collaborator_seats,
+                    'additional' => $seatType === OrganizationSeatType::Administrator
+                        ? $team->additional_administrator_seats
+                        : $team->additional_collaborator_seats,
+                ],
+            ])
+            ->toArray();
+
+        if (Gate::forUser($user)->allows('requestSeatIncrease', $team)) {
+            $pendingSeatIncreaseRequest = $team->seatIncreaseRequests()
+                ->with('requester')
+                ->where('status', SeatIncreaseRequestStatus::Pending->value)
+                ->latest()
+                ->first();
+
+            $this->pendingSeatIncreaseRequest = $pendingSeatIncreaseRequest === null
+                ? null
+                : [
+                    'administrator_seats' => $pendingSeatIncreaseRequest->requested_administrator_seats,
+                    'collaborator_seats' => $pendingSeatIncreaseRequest->requested_collaborator_seats,
+                    'justification' => $pendingSeatIncreaseRequest->justification,
+                    'requester' => $pendingSeatIncreaseRequest->requester?->name ?? 'Usuario eliminado',
+                    'created_at' => $pendingSeatIncreaseRequest->created_at?->format('d/m/Y H:i'),
+                ];
+
+            $this->seatIncreaseRequestHistory = $team->seatIncreaseRequests()
+                ->with(['requester', 'reviewer'])
+                ->whereIn('status', [
+                    SeatIncreaseRequestStatus::Approved->value,
+                    SeatIncreaseRequestStatus::Rejected->value,
+                ])
+                ->latest('reviewed_at')
+                ->limit(5)
+                ->get()
+                ->map(fn ($request) => [
+                    'status' => $request->status->value,
+                    'status_label' => $request->status->label(),
+                    'administrator_seats' => $request->requested_administrator_seats,
+                    'collaborator_seats' => $request->requested_collaborator_seats,
+                    'requester' => $request->requester?->name ?? 'Usuario eliminado',
+                    'reviewer' => $request->reviewer?->name ?? 'Usuario eliminado',
+                    'reviewed_at' => $request->reviewed_at?->format('d/m/Y H:i'),
+                    'review_notes' => $request->review_notes,
+                ])
+                ->toArray();
+        } else {
+            $this->pendingSeatIncreaseRequest = null;
+            $this->seatIncreaseRequestHistory = [];
+        }
 
         $this->isCurrentTeam = $user->isCurrentTeam($team);
     }
@@ -169,6 +337,12 @@ new class extends Component
     public function permissions(): TeamPermissions
     {
         return Auth::user()->toTeamPermissions($this->teamModel);
+    }
+
+    #[Computed]
+    public function canRequestSeatIncrease(): bool
+    {
+        return Gate::allows('requestSeatIncrease', $this->teamModel);
     }
 }; ?>
 
@@ -197,6 +371,100 @@ new class extends Component
                 @endif
             </div>
 
+            @if (! $teamData['is_personal'])
+                <div class="space-y-4" data-test="organization-seat-summary">
+                    <div>
+                        <flux:heading>{{ __('Organization seats') }}</flux:heading>
+                        <flux:subheading>{{ __('Active and suspended memberships, plus pending invitations, occupy seats.') }}</flux:subheading>
+                    </div>
+
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        @foreach ($seatUsage as $seatType => $usage)
+                            <div class="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900" data-test="seat-summary-{{ $seatType }}">
+                                <div class="flex items-start justify-between gap-4">
+                                    <div>
+                                        <div class="font-medium">{{ $usage['label'] }}</div>
+                                        <flux:text class="text-sm text-zinc-500 dark:text-zinc-400">
+                                            {{ __(':occupied of :capacity occupied', [
+                                                'occupied' => $usage['occupied'],
+                                                'capacity' => $usage['capacity'],
+                                            ]) }}
+                                        </flux:text>
+                                    </div>
+
+                                    <flux:badge :color="$usage['available'] > 0 ? 'green' : 'red'">
+                                        {{ __('Available: :count', ['count' => $usage['available']]) }}
+                                    </flux:badge>
+                                </div>
+
+                                <div class="mt-4 flex flex-wrap gap-2 text-sm">
+                                    <flux:badge color="zinc">{{ __('Included: :count', ['count' => $usage['included']]) }}</flux:badge>
+                                    <flux:badge color="zinc">{{ __('Additional: :count', ['count' => $usage['additional']]) }}</flux:badge>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+
+                    @if ($this->canRequestSeatIncrease && $pendingSeatIncreaseRequest !== null)
+                        <div class="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/30" data-test="pending-seat-increase-request">
+                            <div class="flex items-center justify-between gap-4">
+                                <div>
+                                    <div class="font-medium text-amber-900 dark:text-amber-100">Solicitud de cupos pendiente</div>
+                                    <flux:text class="text-sm text-amber-800 dark:text-amber-200">
+                                        Solicitada por {{ $pendingSeatIncreaseRequest['requester'] }} el {{ $pendingSeatIncreaseRequest['created_at'] }}.
+                                    </flux:text>
+                                </div>
+                                <flux:badge color="amber">Pendiente</flux:badge>
+                            </div>
+
+                            <div class="mt-3 flex flex-wrap gap-2">
+                                <flux:badge color="zinc">Administradores: +{{ $pendingSeatIncreaseRequest['administrator_seats'] }}</flux:badge>
+                                <flux:badge color="zinc">Colaboradores: +{{ $pendingSeatIncreaseRequest['collaborator_seats'] }}</flux:badge>
+                            </div>
+
+                            <flux:text class="mt-3 text-sm">{{ $pendingSeatIncreaseRequest['justification'] }}</flux:text>
+                        </div>
+                    @elseif ($this->canRequestSeatIncrease)
+                        <div>
+                            <flux:modal.trigger name="request-additional-seats">
+                                <flux:button variant="outline" icon="plus" data-test="request-additional-seats-button">
+                                    Solicitar cupos adicionales
+                                </flux:button>
+                            </flux:modal.trigger>
+                        </div>
+                    @endif
+
+                    @if ($this->canRequestSeatIncrease && count($seatIncreaseRequestHistory) > 0)
+                        <div class="space-y-3" data-test="seat-increase-request-history">
+                            <div class="font-medium">Historial de solicitudes</div>
+
+                            @foreach ($seatIncreaseRequestHistory as $historyItem)
+                                <div class="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900" data-test="seat-increase-history-row">
+                                    <div class="flex items-start justify-between gap-4">
+                                        <div>
+                                            <div class="flex flex-wrap gap-2">
+                                                <flux:badge color="zinc">Administradores: +{{ $historyItem['administrator_seats'] }}</flux:badge>
+                                                <flux:badge color="zinc">Colaboradores: +{{ $historyItem['collaborator_seats'] }}</flux:badge>
+                                            </div>
+                                            <flux:text class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                                                Solicitada por {{ $historyItem['requester'] }} · Revisada por {{ $historyItem['reviewer'] }} el {{ $historyItem['reviewed_at'] }}
+                                            </flux:text>
+                                        </div>
+                                        <flux:badge :color="$historyItem['status'] === 'approved' ? 'green' : 'red'">
+                                            {{ $historyItem['status_label'] }}
+                                        </flux:badge>
+                                    </div>
+
+                                    @if ($historyItem['review_notes'])
+                                        <flux:text class="mt-3 text-sm">{{ $historyItem['review_notes'] }}</flux:text>
+                                    @endif
+                                </div>
+                            @endforeach
+                        </div>
+                    @endif
+                </div>
+            @endif
+
             <div class="space-y-6">
                 <div class="flex items-center justify-between">
                     <div>
@@ -207,11 +475,21 @@ new class extends Component
                     </div>
 
                     @if ($this->permissions->canCreateInvitation)
-                        <flux:modal.trigger name="invite-member">
-                            <flux:button variant="primary" icon="user-plus" data-test="invite-member-button">
-                                {{ __('Invite member') }}
-                            </flux:button>
-                        </flux:modal.trigger>
+                        <div class="flex flex-wrap gap-2">
+                            @if ($this->permissions->canAddMember)
+                                <flux:modal.trigger name="create-organization-user">
+                                    <flux:button variant="primary" icon="user-plus" data-test="create-organization-user-button">
+                                        Crear usuario
+                                    </flux:button>
+                                </flux:modal.trigger>
+                            @endif
+
+                            <flux:modal.trigger name="invite-member">
+                                <flux:button variant="outline" icon="envelope" data-test="invite-member-button">
+                                    Enviar invitación
+                                </flux:button>
+                            </flux:modal.trigger>
+                        </div>
                     @endif
                 </div>
 
@@ -410,7 +688,105 @@ new class extends Component
         <livewire:pages::teams.invite-member-modal :team="$teamModel" />
     @endif
 
+    @if ($this->permissions->canAddMember)
+        <flux:modal name="create-organization-user" :show="$errors->hasAny(['newUserName', 'newUserEmail', 'newUserRole'])" focusable class="max-w-lg">
+            <form wire:submit="createOrganizationUser" class="space-y-6">
+                <div>
+                    <flux:heading size="lg">Crear usuario de la organización</flux:heading>
+                    <flux:subheading>
+                        Si el correo es nuevo, la persona recibirá un enlace para establecer su contraseña. Si ya existe, se reutilizará su identidad global.
+                    </flux:subheading>
+                </div>
+
+                <div class="space-y-4">
+                    <flux:input
+                        wire:model="newUserName"
+                        label="Nombre completo"
+                        type="text"
+                        required
+                        data-test="new-organization-user-name"
+                    />
+                    <flux:input
+                        wire:model="newUserEmail"
+                        label="Correo electrónico"
+                        type="email"
+                        required
+                        data-test="new-organization-user-email"
+                    />
+                    <flux:select wire:model="newUserRole" label="Rol" data-test="new-organization-user-role">
+                        @foreach ($availableRoles as $role)
+                            <flux:select.option value="{{ $role['value'] }}">{{ $role['label'] }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                </div>
+
+                <div class="flex justify-end gap-2">
+                    <flux:modal.close>
+                        <flux:button variant="filled">Cancelar</flux:button>
+                    </flux:modal.close>
+                    <flux:button variant="primary" type="submit" data-test="create-organization-user-submit">
+                        Crear usuario
+                    </flux:button>
+                </div>
+            </form>
+        </flux:modal>
+    @endif
+
     @if ($this->permissions->canDeleteTeam && ! $teamData['is_personal'])
         <livewire:pages::teams.delete-team-modal :team="$teamModel" />
+    @endif
+
+    @if ($this->canRequestSeatIncrease && ! $teamData['is_personal'])
+        <flux:modal name="request-additional-seats" :show="$errors->hasAny(['requestedAdministratorSeats', 'requestedCollaboratorSeats', 'seatIncreaseJustification', 'seatIncreaseRequest'])" focusable class="max-w-lg">
+            <form wire:submit="requestAdditionalSeats" class="space-y-6">
+                <div>
+                    <flux:heading size="lg">Solicitar cupos adicionales</flux:heading>
+                    <flux:subheading>Indica los cupos que necesita la organización. El Platform Owner revisará la solicitud.</flux:subheading>
+                </div>
+
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <flux:input
+                        wire:model="requestedAdministratorSeats"
+                        type="number"
+                        min="0"
+                        step="1"
+                        label="Administradores adicionales"
+                        required
+                        data-test="requested-administrator-seats"
+                    />
+                    <flux:input
+                        wire:model="requestedCollaboratorSeats"
+                        type="number"
+                        min="0"
+                        step="1"
+                        label="Colaboradores adicionales"
+                        required
+                        data-test="requested-collaborator-seats"
+                    />
+                </div>
+
+                <flux:textarea
+                    wire:model="seatIncreaseJustification"
+                    label="Justificación"
+                    rows="4"
+                    maxlength="1000"
+                    required
+                    data-test="seat-increase-justification"
+                />
+
+                @error('seatIncreaseRequest')
+                    <flux:text class="text-sm text-red-600 dark:text-red-400">{{ $message }}</flux:text>
+                @enderror
+
+                <div class="flex justify-end gap-2">
+                    <flux:modal.close>
+                        <flux:button variant="filled">Cancelar</flux:button>
+                    </flux:modal.close>
+                    <flux:button variant="primary" type="submit" data-test="submit-seat-increase-request">
+                        Enviar solicitud
+                    </flux:button>
+                </div>
+            </form>
+        </flux:modal>
     @endif
 </section>

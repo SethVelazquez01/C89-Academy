@@ -1,11 +1,10 @@
 <?php
 
+use App\Actions\Teams\CreateTeamInvitation;
 use App\Enums\TeamRole;
 use App\Models\Team;
 use App\Notifications\Teams\TeamInvitation as TeamInvitationNotification;
-use App\Rules\UniqueTeamInvitation;
 use Flux\Flux;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Validation\Rule;
@@ -29,16 +28,16 @@ new class extends Component {
         Gate::authorize('inviteMember', $this->team);
 
         $validated = $this->validate([
-            'inviteEmail' => ['required', 'string', 'email', 'max:255', new UniqueTeamInvitation($this->team)],
+            'inviteEmail' => ['required', 'string', 'email', 'max:255'],
             'inviteRole' => ['required', 'string', Rule::in(TeamRole::assignableValues())],
         ]);
 
-        $invitation = $this->team->invitations()->create([
-            'email' => $validated['inviteEmail'],
-            'role' => TeamRole::from($validated['inviteRole']),
-            'invited_by' => Auth::id(),
-            'expires_at' => now()->addDays(3),
-        ]);
+        $invitation = app(CreateTeamInvitation::class)->handle(
+            auth()->user(),
+            $this->team,
+            $validated['inviteEmail'],
+            $validated['inviteRole'],
+        );
 
         Notification::route('mail', $invitation->email)
             ->notify(new TeamInvitationNotification($invitation));

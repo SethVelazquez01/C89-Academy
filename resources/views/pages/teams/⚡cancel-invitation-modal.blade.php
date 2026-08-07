@@ -2,6 +2,7 @@
 
 use App\Models\Team;
 use Flux\Flux;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Component;
 
@@ -29,15 +30,29 @@ new class extends Component {
 
     public function cancelInvitation(): void
     {
-        $invitation = $this->team->invitations()->where('code', $this->invitationCode)->firstOrFail();
+        $invitationEmail = DB::transaction(function (): string {
+            $team = Team::query()
+                ->lockForUpdate()
+                ->findOrFail($this->team->id);
+
+            Gate::authorize('cancelInvitation', $team);
+
+            $invitation = $team->invitations()
+                ->where('code', $this->invitationCode)
+                ->whereNull('accepted_at')
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $email = $invitation->email;
+
+            $invitation->delete();
+
+            return $email;
+        });
 
         if ($this->invitationEmail === '') {
-            $this->invitationEmail = $invitation->email;
+            $this->invitationEmail = $invitationEmail;
         }
-
-        Gate::authorize('cancelInvitation', $this->team);
-
-        $invitation->delete();
 
         $this->dispatch('close-modal', name: $this->modalName);
 

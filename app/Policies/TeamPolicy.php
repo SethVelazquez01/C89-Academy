@@ -107,6 +107,39 @@ class TeamPolicy
     }
 
     /**
+     * Allow active organization administrators to request additional seats.
+     */
+    public function requestSeatIncrease(User $user, Team $team): bool
+    {
+        return ! $team->is_personal
+            && $user->hasTeamPermission($team, TeamPermission::UpdateTeam);
+    }
+
+    /**
+     * Allow only the global platform owner to review seat requests.
+     */
+    public function reviewSeatIncreaseGlobally(User $user, Team $team): bool
+    {
+        return $user->isPlatformOwner() && ! $team->is_personal;
+    }
+
+    /**
+     * Allow only the global platform owner to provision organization administrators.
+     */
+    public function provisionAdministratorGlobally(User $user, Team $team): bool
+    {
+        return $user->isPlatformOwner() && ! $team->is_personal;
+    }
+
+    /**
+     * Allow only the global platform owner to inspect organization users.
+     */
+    public function viewMembersGlobally(User $user, Team $team): bool
+    {
+        return $user->isPlatformOwner() && ! $team->is_personal;
+    }
+
+    /**
      * Determine whether the user can delete the organization.
      */
     public function delete(User $user, Team $team): bool

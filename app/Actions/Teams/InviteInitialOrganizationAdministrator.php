@@ -3,6 +3,7 @@
 namespace App\Actions\Teams;
 
 use App\Enums\MembershipStatus;
+use App\Enums\OrganizationSeatType;
 use App\Enums\TeamRole;
 use App\Models\Team;
 use App\Models\TeamInvitation;
@@ -44,6 +45,12 @@ class InviteInitialOrganizationAdministrator
             if ($hasAdministrator || $hasPendingAdministratorInvitation) {
                 throw ValidationException::withMessages([
                     'administratorEmail' => [__('This organization already has an administrator or a pending administrator invitation.')],
+                ]);
+            }
+
+            if (! $lockedOrganization->hasAvailableSeat(OrganizationSeatType::Administrator)) {
+                throw ValidationException::withMessages([
+                    'administratorEmail' => [__('There are no available administrator seats in this organization.')],
                 ]);
             }
 

@@ -39,7 +39,7 @@ class UniqueTeamInvitation implements ValidationRule
             ->whereNull('accepted_at')
             ->where(function ($query) {
                 $query->whereNull('expires_at')
-                    ->orWhere('expires_at', '>', now());
+                    ->orWhere('expires_at', '>=', now());
             })
             ->exists();
 

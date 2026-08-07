@@ -1,12 +1,17 @@
 <?php
 
-use App\Actions\Teams\CreateTeam;
 use App\Actions\Teams\CancelInitialOrganizationAdministratorInvitation;
+use App\Actions\Teams\CreateTeam;
 use App\Actions\Teams\DeleteOrganization;
 use App\Actions\Teams\InviteInitialOrganizationAdministrator;
+use App\Actions\Teams\ProvisionOrganizationUser;
+use App\Actions\Teams\ReviewSeatIncreaseRequest;
 use App\Actions\Teams\UpdateOrganization;
 use App\Data\UserTeam;
+use App\Enums\OrganizationSeatType;
+use App\Enums\SeatIncreaseRequestStatus;
 use App\Enums\TeamRole;
+use App\Models\SeatIncreaseRequest;
 use App\Models\Team;
 use App\Notifications\Teams\TeamInvitation as TeamInvitationNotification;
 use App\Rules\TeamName;
@@ -15,6 +20,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -43,6 +49,26 @@ new #[Title('Teams')] class extends Component {
     public string $cancelingAdministratorInvitationCode = '';
 
     public string $cancelingAdministratorInvitationEmail = '';
+
+    public ?int $reviewingSeatIncreaseRequestId = null;
+
+    public array $reviewingSeatIncreaseRequestData = [];
+
+    public string $seatIncreaseReviewNotes = '';
+
+    public ?int $viewingOrganizationId = null;
+
+    public string $viewingOrganizationName = '';
+
+    public array $viewingOrganizationMembers = [];
+
+    public array $viewingOrganizationInvitations = [];
+
+    public array $viewingOrganizationSeats = [];
+
+    public string $ownerAdministratorName = '';
+
+    public string $ownerAdministratorEmail = '';
 
     public function createTeam(CreateTeam $createTeam): void
     {
@@ -236,6 +262,177 @@ new #[Title('Teams')] class extends Component {
         $this->redirectRoute('teams.index', navigate: true);
     }
 
+    public function showSeatIncreaseReviewModal(int $requestId): void
+    {
+        $request = SeatIncreaseRequest::query()
+            ->with(['team', 'requester'])
+            ->where('status', SeatIncreaseRequestStatus::Pending->value)
+            ->findOrFail($requestId);
+
+        Gate::authorize('reviewSeatIncreaseGlobally', $request->team);
+
+        $this->resetValidation();
+        $this->reviewingSeatIncreaseRequestId = $request->id;
+        $this->seatIncreaseReviewNotes = '';
+        $this->reviewingSeatIncreaseRequestData = [
+            'organization' => $request->team->name,
+            'requester' => $request->requester?->name ?? 'Usuario eliminado',
+            'administrator_seats' => $request->requested_administrator_seats,
+            'collaborator_seats' => $request->requested_collaborator_seats,
+            'justification' => $request->justification,
+            'created_at' => $request->created_at?->format('d/m/Y H:i'),
+            'current_administrator_capacity' => $request->team->seatCapacity(OrganizationSeatType::Administrator),
+            'current_collaborator_capacity' => $request->team->seatCapacity(OrganizationSeatType::Collaborator),
+        ];
+
+        Flux::modal('review-seat-increase-request')->show();
+    }
+
+    public function reviewSeatIncreaseRequest(
+        string $decision,
+        ReviewSeatIncreaseRequest $reviewSeatIncreaseRequest,
+    ): void {
+        $validated = $this->validate([
+            'seatIncreaseReviewNotes' => ['nullable', 'string', 'max:1000'],
+        ], [
+            'seatIncreaseReviewNotes.max' => 'Las notas de revisión no pueden superar 1000 caracteres.',
+        ]);
+
+        if ($decision === SeatIncreaseRequestStatus::Rejected->value
+            && blank($validated['seatIncreaseReviewNotes'])) {
+            throw ValidationException::withMessages([
+                'seatIncreaseReviewNotes' => ['Debes indicar el motivo del rechazo.'],
+            ]);
+        }
+
+        $request = SeatIncreaseRequest::query()->findOrFail($this->reviewingSeatIncreaseRequestId);
+
+        $reviewedRequest = $reviewSeatIncreaseRequest->handle(
+            Auth::user(),
+            $request,
+            $decision,
+            $validated['seatIncreaseReviewNotes'] ?: null,
+        );
+
+        Flux::modal('review-seat-increase-request')->close();
+
+        $this->reset(
+            'reviewingSeatIncreaseRequestId',
+            'reviewingSeatIncreaseRequestData',
+            'seatIncreaseReviewNotes',
+        );
+        unset($this->pendingSeatIncreaseRequests);
+
+        Flux::toast(
+            variant: 'success',
+            text: $reviewedRequest->status === SeatIncreaseRequestStatus::Approved
+                ? 'Solicitud de cupos aprobada.'
+                : 'Solicitud de cupos rechazada.',
+        );
+    }
+
+    public function showOrganizationMembersModal(int $organizationId): void
+    {
+        $organization = Team::query()
+            ->where('is_personal', false)
+            ->findOrFail($organizationId);
+
+        Gate::authorize('viewMembersGlobally', $organization);
+
+        $this->resetValidation();
+        $this->viewingOrganizationId = $organization->id;
+        $this->viewingOrganizationName = $organization->name;
+        $this->ownerAdministratorName = '';
+        $this->ownerAdministratorEmail = '';
+        $this->populateViewingOrganization($organization);
+
+        Flux::modal('view-platform-organization-members')->show();
+    }
+
+    public function createOrganizationAdministrator(
+        ProvisionOrganizationUser $provisionOrganizationUser,
+    ): void {
+        $validated = $this->validate([
+            'ownerAdministratorName' => ['required', 'string', 'max:255'],
+            'ownerAdministratorEmail' => ['required', 'string', 'email', 'max:255'],
+        ], [
+            'ownerAdministratorName.required' => 'El nombre es obligatorio.',
+            'ownerAdministratorName.max' => 'El nombre no puede superar 255 caracteres.',
+            'ownerAdministratorEmail.required' => 'El correo electrónico es obligatorio.',
+            'ownerAdministratorEmail.email' => 'El correo electrónico no tiene un formato válido.',
+        ]);
+
+        $organization = Team::query()
+            ->where('is_personal', false)
+            ->findOrFail($this->viewingOrganizationId);
+
+        try {
+            $provisionOrganizationUser->handle(
+                Auth::user(),
+                $organization,
+                $validated['ownerAdministratorName'],
+                $validated['ownerAdministratorEmail'],
+                TeamRole::Admin->value,
+            );
+        } catch (ValidationException $exception) {
+            throw ValidationException::withMessages([
+                'ownerAdministratorEmail' => collect($exception->errors())->flatten()->all(),
+            ]);
+        }
+
+        $this->reset('ownerAdministratorName', 'ownerAdministratorEmail');
+        $this->populateViewingOrganization($organization->fresh());
+        unset($this->platformOrganizations);
+
+        Flux::toast(
+            variant: 'success',
+            text: 'Administrador creado. Si la identidad es nueva, recibirá un correo para establecer su contraseña.',
+        );
+    }
+
+    private function populateViewingOrganization(Team $organization): void
+    {
+        $this->viewingOrganizationMembers = $organization->members()
+            ->orderByRaw('LOWER(name)')
+            ->get()
+            ->map(fn ($member) => [
+                'id' => $member->id,
+                'name' => $member->name,
+                'email' => $member->email,
+                'initials' => $member->initials(),
+                'role' => $member->pivot->role->value,
+                'role_label' => $member->pivot->role->label(),
+                'status' => $member->pivot->status->value,
+                'status_label' => $member->pivot->status->label(),
+            ])
+            ->toArray();
+
+        $this->viewingOrganizationInvitations = $organization->invitations()
+            ->whereNull('accepted_at')
+            ->where(fn ($query) => $query
+                ->whereNull('expires_at')
+                ->orWhere('expires_at', '>=', now()))
+            ->latest()
+            ->get()
+            ->map(fn ($invitation) => [
+                'email' => $invitation->email,
+                'role_label' => $invitation->role->label(),
+                'expires_at' => $invitation->expires_at?->format('d/m/Y H:i'),
+            ])
+            ->toArray();
+
+        $this->viewingOrganizationSeats = [
+            'administrators' => [
+                'occupied' => $organization->occupiedSeats(OrganizationSeatType::Administrator),
+                'capacity' => $organization->seatCapacity(OrganizationSeatType::Administrator),
+            ],
+            'collaborators' => [
+                'occupied' => $organization->occupiedSeats(OrganizationSeatType::Collaborator),
+                'capacity' => $organization->seatCapacity(OrganizationSeatType::Collaborator),
+            ],
+        ];
+    }
+
     public function leaveTeam(int $teamId): void
     {
         $team = Team::findOrFail($teamId);
@@ -295,6 +492,36 @@ new #[Title('Teams')] class extends Component {
                         ->orWhere('expires_at', '>', now())),
             ])
             ->orderByRaw('LOWER(name)')
+            ->get();
+    }
+
+    /** @return Collection<int, SeatIncreaseRequest> */
+    #[Computed]
+    public function pendingSeatIncreaseRequests(): Collection
+    {
+        Gate::authorize('create', Team::class);
+
+        return SeatIncreaseRequest::query()
+            ->with(['team', 'requester'])
+            ->where('status', SeatIncreaseRequestStatus::Pending->value)
+            ->oldest()
+            ->get();
+    }
+
+    /** @return Collection<int, SeatIncreaseRequest> */
+    #[Computed]
+    public function recentSeatIncreaseReviews(): Collection
+    {
+        Gate::authorize('create', Team::class);
+
+        return SeatIncreaseRequest::query()
+            ->with(['team', 'requester', 'reviewer'])
+            ->whereIn('status', [
+                SeatIncreaseRequestStatus::Approved->value,
+                SeatIncreaseRequestStatus::Rejected->value,
+            ])
+            ->latest('reviewed_at')
+            ->limit(10)
             ->get();
     }
 }; ?>
@@ -363,6 +590,16 @@ new #[Title('Teams')] class extends Component {
                                 </flux:tooltip>
                             @endif
 
+                            <flux:tooltip content="Ver miembros">
+                                <flux:button
+                                    variant="ghost"
+                                    size="sm"
+                                    icon="users"
+                                    wire:click="showOrganizationMembersModal({{ $organization->id }})"
+                                    data-test="platform-organization-view-members"
+                                />
+                            </flux:tooltip>
+
                             <flux:tooltip :content="__('Edit organization')">
                                 <flux:button
                                     variant="ghost"
@@ -391,6 +628,75 @@ new #[Title('Teams')] class extends Component {
                     </flux:text>
                 @endforelse
             </div>
+
+            <div class="mt-8 space-y-3" data-test="pending-seat-increase-requests">
+                <div>
+                    <flux:heading size="lg">Solicitudes de cupos</flux:heading>
+                    <flux:text>Revisa las solicitudes pendientes de las organizaciones.</flux:text>
+                </div>
+
+                @forelse ($this->pendingSeatIncreaseRequests as $request)
+                    <div class="flex items-center justify-between gap-4 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900" data-test="seat-increase-request-row">
+                        <div>
+                            <div class="font-medium">{{ $request->team->name }}</div>
+                            <flux:text class="text-sm text-zinc-500 dark:text-zinc-400">
+                                Solicitada por {{ $request->requester?->name ?? 'Usuario eliminado' }} · {{ $request->created_at?->format('d/m/Y H:i') }}
+                            </flux:text>
+                            <div class="mt-2 flex flex-wrap gap-2">
+                                <flux:badge color="zinc">Administradores: +{{ $request->requested_administrator_seats }}</flux:badge>
+                                <flux:badge color="zinc">Colaboradores: +{{ $request->requested_collaborator_seats }}</flux:badge>
+                                <flux:badge color="amber">Pendiente</flux:badge>
+                            </div>
+                        </div>
+
+                        <flux:button
+                            variant="outline"
+                            wire:click="showSeatIncreaseReviewModal({{ $request->id }})"
+                            data-test="review-seat-increase-request-button"
+                        >
+                            Revisar
+                        </flux:button>
+                    </div>
+                @empty
+                    <flux:text class="rounded-lg border border-dashed border-zinc-300 py-8 text-center text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                        No hay solicitudes de cupos pendientes.
+                    </flux:text>
+                @endforelse
+            </div>
+
+            @if ($this->recentSeatIncreaseReviews->isNotEmpty())
+                <div class="mt-8 space-y-3" data-test="recent-seat-increase-reviews">
+                    <div>
+                        <flux:heading size="lg">Historial reciente de cupos</flux:heading>
+                        <flux:text>Últimas solicitudes aprobadas o rechazadas.</flux:text>
+                    </div>
+
+                    @foreach ($this->recentSeatIncreaseReviews as $reviewedRequest)
+                        <div class="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900" data-test="reviewed-seat-increase-request-row">
+                            <div class="flex items-start justify-between gap-4">
+                                <div>
+                                    <div class="font-medium">{{ $reviewedRequest->team->name }}</div>
+                                    <flux:text class="text-sm text-zinc-500 dark:text-zinc-400">
+                                        Solicitada por {{ $reviewedRequest->requester?->name ?? 'Usuario eliminado' }} ·
+                                        Revisada por {{ $reviewedRequest->reviewer?->name ?? 'Usuario eliminado' }} el {{ $reviewedRequest->reviewed_at?->format('d/m/Y H:i') }}
+                                    </flux:text>
+                                    <div class="mt-2 flex flex-wrap gap-2">
+                                        <flux:badge color="zinc">Administradores: +{{ $reviewedRequest->requested_administrator_seats }}</flux:badge>
+                                        <flux:badge color="zinc">Colaboradores: +{{ $reviewedRequest->requested_collaborator_seats }}</flux:badge>
+                                    </div>
+                                    @if ($reviewedRequest->review_notes)
+                                        <flux:text class="mt-2 text-sm">{{ $reviewedRequest->review_notes }}</flux:text>
+                                    @endif
+                                </div>
+
+                                <flux:badge :color="$reviewedRequest->status === SeatIncreaseRequestStatus::Approved ? 'green' : 'red'">
+                                    {{ $reviewedRequest->status->label() }}
+                                </flux:badge>
+                            </div>
+                        </div>
+                    @endforeach
+                </div>
+            @endif
         @endif
 
         <div class="mt-6 space-y-3" data-test="user-team-memberships">
@@ -598,6 +904,153 @@ new #[Title('Teams')] class extends Component {
                     </flux:button>
                 </div>
             </form>
+        </flux:modal>
+
+        <flux:modal name="review-seat-increase-request" :show="$errors->hasAny(['seatIncreaseReviewNotes', 'seatIncreaseRequest'])" focusable class="max-w-xl">
+            <div class="space-y-6">
+                <div>
+                    <flux:heading size="lg">Revisar solicitud de cupos</flux:heading>
+                    <flux:subheading>
+                        {{ $reviewingSeatIncreaseRequestData['organization'] ?? '' }} · Solicitada por {{ $reviewingSeatIncreaseRequestData['requester'] ?? '' }}
+                    </flux:subheading>
+                </div>
+
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <div class="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
+                        <flux:text class="text-sm text-zinc-500">Administradores</flux:text>
+                        <div class="font-medium">
+                            {{ $reviewingSeatIncreaseRequestData['current_administrator_capacity'] ?? 0 }} actuales
+                            + {{ $reviewingSeatIncreaseRequestData['administrator_seats'] ?? 0 }} solicitados
+                        </div>
+                    </div>
+                    <div class="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
+                        <flux:text class="text-sm text-zinc-500">Colaboradores</flux:text>
+                        <div class="font-medium">
+                            {{ $reviewingSeatIncreaseRequestData['current_collaborator_capacity'] ?? 0 }} actuales
+                            + {{ $reviewingSeatIncreaseRequestData['collaborator_seats'] ?? 0 }} solicitados
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="mb-1 text-sm font-medium">Justificación</div>
+                    <flux:text>{{ $reviewingSeatIncreaseRequestData['justification'] ?? '' }}</flux:text>
+                </div>
+
+                <flux:textarea
+                    wire:model="seatIncreaseReviewNotes"
+                    label="Notas de revisión"
+                    description="Son obligatorias para rechazar y opcionales para aprobar."
+                    rows="4"
+                    maxlength="1000"
+                    data-test="seat-increase-review-notes"
+                />
+
+                @error('seatIncreaseRequest')
+                    <flux:text class="text-sm text-red-600 dark:text-red-400">{{ $message }}</flux:text>
+                @enderror
+
+                <div class="flex justify-end gap-2">
+                    <flux:modal.close>
+                        <flux:button variant="filled">Cancelar</flux:button>
+                    </flux:modal.close>
+                    <flux:button
+                        variant="danger"
+                        wire:click="reviewSeatIncreaseRequest('{{ SeatIncreaseRequestStatus::Rejected->value }}')"
+                        data-test="reject-seat-increase-request"
+                    >
+                        Rechazar
+                    </flux:button>
+                    <flux:button
+                        variant="primary"
+                        wire:click="reviewSeatIncreaseRequest('{{ SeatIncreaseRequestStatus::Approved->value }}')"
+                        data-test="approve-seat-increase-request"
+                    >
+                        Aprobar
+                    </flux:button>
+                </div>
+            </div>
+        </flux:modal>
+
+        <flux:modal name="view-platform-organization-members" :show="$errors->hasAny(['ownerAdministratorName', 'ownerAdministratorEmail'])" focusable class="max-w-4xl">
+            <div class="space-y-8">
+                <div>
+                    <flux:heading size="lg">Usuarios de {{ $viewingOrganizationName }}</flux:heading>
+                    <flux:subheading>Consulta miembros e invitaciones y crea administradores sin convertirte en miembro de la organización.</flux:subheading>
+                </div>
+
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+                        <flux:text class="text-sm text-zinc-500">Cupos de administradores</flux:text>
+                        <div class="text-lg font-medium">
+                            {{ $viewingOrganizationSeats['administrators']['occupied'] ?? 0 }} de {{ $viewingOrganizationSeats['administrators']['capacity'] ?? 0 }} ocupados
+                        </div>
+                    </div>
+                    <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+                        <flux:text class="text-sm text-zinc-500">Cupos de colaboradores</flux:text>
+                        <div class="text-lg font-medium">
+                            {{ $viewingOrganizationSeats['collaborators']['occupied'] ?? 0 }} de {{ $viewingOrganizationSeats['collaborators']['capacity'] ?? 0 }} ocupados
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-3" data-test="platform-organization-members-list">
+                    <div class="font-medium">Miembros actuales</div>
+
+                    @forelse ($viewingOrganizationMembers as $member)
+                        <div class="flex items-center justify-between gap-4 rounded-lg border border-zinc-200 p-3 dark:border-zinc-700" data-test="platform-organization-member-row">
+                            <div class="flex items-center gap-3">
+                                <flux:avatar :name="$member['name']" :initials="$member['initials']" />
+                                <div>
+                                    <div class="font-medium">{{ $member['name'] }}</div>
+                                    <flux:text class="text-sm text-zinc-500">{{ $member['email'] }}</flux:text>
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                <flux:badge color="zinc">{{ $member['role_label'] }}</flux:badge>
+                                <flux:badge :color="$member['status'] === 'active' ? 'green' : 'amber'">{{ $member['status_label'] }}</flux:badge>
+                            </div>
+                        </div>
+                    @empty
+                        <flux:text class="rounded-lg border border-dashed border-zinc-300 p-6 text-center text-zinc-500 dark:border-zinc-700">
+                            Esta organización todavía no tiene miembros.
+                        </flux:text>
+                    @endforelse
+                </div>
+
+                @if (count($viewingOrganizationInvitations) > 0)
+                    <div class="space-y-3" data-test="platform-organization-pending-invitations">
+                        <div class="font-medium">Invitaciones pendientes</div>
+                        @foreach ($viewingOrganizationInvitations as $invitation)
+                            <div class="flex items-center justify-between rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
+                                <div>
+                                    <div>{{ $invitation['email'] }}</div>
+                                    <flux:text class="text-sm text-zinc-500">{{ $invitation['role_label'] }}</flux:text>
+                                </div>
+                                <flux:text class="text-sm text-zinc-500">Vence: {{ $invitation['expires_at'] ?? 'Sin vencimiento' }}</flux:text>
+                            </div>
+                        @endforeach
+                    </div>
+                @endif
+
+                <form wire:submit="createOrganizationAdministrator" class="space-y-4 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+                    <div>
+                        <div class="font-medium">Crear administrador</div>
+                        <flux:text class="text-sm text-zinc-500">La persona recibirá un enlace para establecer su contraseña si aún no tiene identidad.</flux:text>
+                    </div>
+
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <flux:input wire:model="ownerAdministratorName" label="Nombre completo" required data-test="owner-administrator-name" />
+                        <flux:input wire:model="ownerAdministratorEmail" type="email" label="Correo electrónico" required data-test="owner-administrator-email" />
+                    </div>
+
+                    <div class="flex justify-end">
+                        <flux:button variant="primary" type="submit" data-test="owner-create-administrator-submit">
+                            Crear administrador
+                        </flux:button>
+                    </div>
+                </form>
+            </div>
         </flux:modal>
     @endif
 </section>

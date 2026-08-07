@@ -3,6 +3,7 @@
 namespace App\Actions\Teams;
 
 use App\Enums\MembershipStatus;
+use App\Enums\OrganizationSeatType;
 use App\Enums\TeamRole;
 use App\Models\Membership;
 use App\Models\Team;
@@ -51,6 +52,19 @@ class ChangeMembershipRole
 
             if ($membership->role === $newRole) {
                 return $membership;
+            }
+
+            $currentSeatType = OrganizationSeatType::fromRole($membership->role);
+            $newSeatType = OrganizationSeatType::fromRole($newRole);
+
+            if ($membership->consumesSeat()
+                && $currentSeatType !== $newSeatType
+                && ! $lockedTeam->hasAvailableSeat($newSeatType)) {
+                throw ValidationException::withMessages([
+                    'role' => [__('There are no available :seatType seats in this organization.', [
+                        'seatType' => strtolower($newSeatType->label()),
+                    ])],
+                ]);
             }
 
             if ($membership->status === MembershipStatus::Active

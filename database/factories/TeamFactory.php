@@ -24,6 +24,10 @@ class TeamFactory extends Factory
             'name' => $name,
             'slug' => Str::slug($name),
             'is_personal' => false,
+            'included_administrator_seats' => 10,
+            'additional_administrator_seats' => 0,
+            'included_collaborator_seats' => 10,
+            'additional_collaborator_seats' => 0,
         ];
     }
 
