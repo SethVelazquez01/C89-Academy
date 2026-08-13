@@ -7,6 +7,8 @@ enum LessonType: string
     case Text = 'text';
     case Video = 'video';
     case Document = 'document';
+    case Presentation = 'presentation';
+    case Image = 'image';
     case Link = 'link';
 
     /**
@@ -18,6 +20,8 @@ enum LessonType: string
             self::Text => 'Texto',
             self::Video => 'Video',
             self::Document => 'Documento',
+            self::Presentation => 'Presentación',
+            self::Image => 'Imagen',
             self::Link => 'Enlace',
         };
     }

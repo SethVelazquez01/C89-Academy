@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Password as PasswordRule;
 use Illuminate\Validation\ValidationException;
 
 class ProvisionOrganizationUser
@@ -29,15 +30,18 @@ class ProvisionOrganizationUser
         string $name,
         string $email,
         string $role,
+        ?string $password = null,
     ): Membership {
         $validated = validator([
             'name' => trim($name),
             'email' => Str::lower(trim($email)),
             'role' => $role,
+            'password' => $password,
         ], [
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255'],
             'role' => ['required', 'string', Rule::in(TeamRole::assignableValues())],
+            'password' => ['nullable', 'string', PasswordRule::min(8)],
         ], [
             'name.required' => 'El nombre es obligatorio.',
             'name.max' => 'El nombre no puede superar 255 caracteres.',
@@ -112,7 +116,7 @@ class ProvisionOrganizationUser
                 $user = User::query()->create([
                     'name' => $validated['name'],
                     'email' => $validated['email'],
-                    'password' => Str::password(64),
+                    'password' => $validated['password'] ?? Str::password(64),
                 ]);
 
                 $user->forceFill(['email_verified_at' => now()])->save();
@@ -160,7 +164,7 @@ class ProvisionOrganizationUser
             ];
         });
 
-        if ($result['was_created']) {
+        if ($result['was_created'] && blank($validated['password'])) {
             $result['user']->notify(new OrganizationAccountCreated(
                 Password::broker()->createToken($result['user']),
                 $team,

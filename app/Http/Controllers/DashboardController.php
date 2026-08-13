@@ -9,6 +9,7 @@ use App\Models\Course;
 use App\Models\Lesson;
 use App\Models\LessonProgress;
 use App\Models\User;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\View\View;
@@ -18,11 +19,17 @@ class DashboardController extends Controller
     /**
      * Display the learning dashboard for the current organization.
      */
-    public function __invoke(Request $request): View
+    public function __invoke(Request $request): View|RedirectResponse
     {
         $user = $request->user();
 
-        abort_unless($user instanceof User && $user->currentTeam !== null, 403);
+        abort_unless($user instanceof User, 403);
+
+        if ($user->isPlatformOwner()) {
+            return redirect()->route('platform.dashboard');
+        }
+
+        abort_unless($user->currentTeam !== null, 403);
 
         Gate::authorize('viewAny', Course::class);
 
@@ -30,6 +37,11 @@ class DashboardController extends Controller
         $availableCourses = $team
             ->courses()
             ->where('status', CourseStatus::Published)
+            ->withCount([
+                'lessons as published_lessons_count' => fn ($query) => $query
+                    ->where('lessons.is_published', true)
+                    ->where('course_modules.is_published', true),
+            ])
             ->latest('published_at')
             ->get();
 
@@ -37,6 +49,14 @@ class DashboardController extends Controller
         $enrollments = $canSelfEnroll
             ? $user->courseEnrollments()
                 ->whereHas('course', fn ($query) => $query->where('team_id', $team->id))
+                ->withCount([
+                    'lessonProgress as completed_published_lessons_count' => fn ($query) => $query
+                        ->whereNotNull('completed_at')
+                        ->whereHas('lesson', fn ($lessonQuery) => $lessonQuery
+                            ->where('is_published', true)
+                            ->whereHas('courseModule', fn ($moduleQuery) => $moduleQuery
+                                ->where('is_published', true))),
+                ])
                 ->get()
             : collect();
         $enrollmentIds = $enrollments->pluck('id');

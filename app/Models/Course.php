@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
@@ -32,7 +33,9 @@ use Illuminate\Support\Str;
  * @property-read Team $team
  * @property-read User|null $creator
  * @property-read Collection<int, CourseEnrollment> $enrollments
+ * @property-read Collection<int, Lesson> $lessons
  * @property-read Collection<int, CourseModule> $modules
+ * @property-read int|null $published_lessons_count
  */
 #[Fillable([
     'team_id',
@@ -103,6 +106,16 @@ class Course extends Model
     public function modules(): HasMany
     {
         return $this->hasMany(CourseModule::class)->orderBy('position');
+    }
+
+    /**
+     * Get all lessons contained in the course.
+     *
+     * @return HasManyThrough<Lesson, CourseModule, $this>
+     */
+    public function lessons(): HasManyThrough
+    {
+        return $this->hasManyThrough(Lesson::class, CourseModule::class);
     }
 
     /**

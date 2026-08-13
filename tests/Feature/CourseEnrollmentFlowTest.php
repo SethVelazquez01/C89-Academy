@@ -103,7 +103,11 @@ test('a cancelled enrollment is reactivated', function () {
         ->for($this->course)
         ->for($this->collaborator)
         ->cancelled()
-        ->create();
+        ->create([
+            'assigned_by' => $this->administrator->id,
+            'is_required' => true,
+            'due_at' => now()->addWeek(),
+        ]);
 
     $this->actingAs($this->collaborator)
         ->post(route('courses.enroll', [
@@ -113,7 +117,10 @@ test('a cancelled enrollment is reactivated', function () {
         ->assertRedirect();
 
     expect($enrollment->refresh()->status)->toBe(EnrollmentStatus::Active)
-        ->and($enrollment->completed_at)->toBeNull();
+        ->and($enrollment->completed_at)->toBeNull()
+        ->and($enrollment->assigned_by)->toBeNull()
+        ->and($enrollment->is_required)->toBeFalse()
+        ->and($enrollment->due_at)->toBeNull();
 });
 
 test('a completed enrollment is not restarted', function () {

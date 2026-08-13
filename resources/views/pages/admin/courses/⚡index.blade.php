@@ -164,15 +164,26 @@ new class extends Component
                                 Restaurar
                             </flux:button>
                         @else
-                            <flux:button
-                                :href="route('admin.courses.edit', ['course' => $course])"
-                                variant="ghost"
-                                size="sm"
-                                icon="pencil-square"
-                                wire:navigate
-                            >
-                                Editar
-                            </flux:button>
+                            <div class="flex items-center gap-2">
+                                <flux:button
+                                    :href="route('admin.courses.assignments', ['course' => $course])"
+                                    variant="ghost"
+                                    size="sm"
+                                    icon="user-plus"
+                                    wire:navigate
+                                >
+                                    Asignaciones
+                                </flux:button>
+                                <flux:button
+                                    :href="route('admin.courses.edit', ['course' => $course])"
+                                    variant="ghost"
+                                    size="sm"
+                                    icon="pencil-square"
+                                    wire:navigate
+                                >
+                                    Editar
+                                </flux:button>
+                            </div>
                         @endif
                     </div>
                 </article>

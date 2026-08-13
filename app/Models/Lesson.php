@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\LessonType;
+use App\Support\VideoEmbed;
 use Database\Factories\LessonFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Collection;
@@ -89,6 +90,15 @@ class Lesson extends Model
     public function progressRecords(): HasMany
     {
         return $this->hasMany(LessonProgress::class);
+    }
+
+    public function videoEmbed(): ?VideoEmbed
+    {
+        if ($this->type !== LessonType::Video) {
+            return null;
+        }
+
+        return VideoEmbed::fromUrl($this->external_url);
     }
 
     /**

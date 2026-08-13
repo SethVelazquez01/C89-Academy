@@ -45,7 +45,7 @@ beforeEach(function () {
         ->published()
         ->create([
             'title' => 'Video de seguridad',
-            'external_url' => 'https://example.com/video-seguridad',
+            'external_url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
             'position' => 2,
         ]);
     $this->enrollment = CourseEnrollment::factory()
@@ -129,23 +129,38 @@ it('records the first lesson as started when the player opens', function () {
     ]);
 });
 
-it('lets a collaborator select another published lesson', function () {
+it('prevents selecting a later lesson before completing the current one', function () {
     Livewire::actingAs($this->collaborator)
         ->test('pages::courses.show', ['course' => $this->course->slug])
         ->call('selectLesson', $this->secondLesson->id)
-        ->assertSet('selectedLessonId', $this->secondLesson->id)
-        ->assertSee('https://example.com/video-seguridad');
+        ->assertHasErrors(['lesson'])
+        ->assertSet('selectedLessonId', $this->firstLesson->id);
 
-    $this->assertDatabaseHas('lesson_progress', [
+    $this->assertDatabaseMissing('lesson_progress', [
         'course_enrollment_id' => $this->enrollment->id,
         'lesson_id' => $this->secondLesson->id,
-        'completed_at' => null,
     ]);
+});
+
+it('embeds a supported video after its lesson is unlocked', function () {
+    LessonProgress::factory()
+        ->for($this->enrollment)
+        ->for($this->firstLesson)
+        ->completed()
+        ->create();
+
+    Livewire::actingAs($this->collaborator)
+        ->test('pages::courses.show', ['course' => $this->course->slug])
+        ->assertSet('selectedLessonId', $this->secondLesson->id)
+        ->assertSee('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ', false)
+        ->assertDontSee('Abrir video');
 });
 
 it('advances through lessons and displays the real percentage', function () {
     $component = Livewire::actingAs($this->collaborator)
-        ->test('pages::courses.show', ['course' => $this->course->slug])
+        ->test('pages::courses.show', ['course' => $this->course->slug]);
+
+    $component
         ->call('markSelectedLessonComplete')
         ->assertSet('selectedLessonId', $this->secondLesson->id)
         ->assertSee('50%');

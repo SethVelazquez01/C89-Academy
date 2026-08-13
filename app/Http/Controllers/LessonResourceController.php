@@ -12,7 +12,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class LessonResourceController extends Controller
 {
     /**
-     * Download a private lesson document after authorization.
+     * Display a private lesson document inline after authorization.
      */
     public function __invoke(
         Request $request,
@@ -41,7 +41,11 @@ class LessonResourceController extends Controller
         Gate::authorize('view', $lessonModel);
 
         abort_unless(
-            $lessonModel->type === LessonType::Document
+            in_array($lessonModel->type, [
+                LessonType::Document,
+                LessonType::Presentation,
+                LessonType::Image,
+            ], true)
                 && filled($lessonModel->resource_disk)
                 && filled($lessonModel->resource_path)
                 && filled($lessonModel->resource_name),
@@ -54,10 +58,16 @@ class LessonResourceController extends Controller
         abort_unless(config("filesystems.disks.{$disk}") !== null, 404);
         abort_unless(Storage::disk($disk)->exists($path), 404);
 
-        return Storage::disk($disk)->download(
+        return Storage::disk($disk)->response(
             $path,
             (string) $lessonModel->resource_name,
-            ['Content-Type' => $lessonModel->resource_mime ?? 'application/pdf'],
+            [
+                'Content-Type' => $lessonModel->resource_mime ?? 'application/octet-stream',
+                'Cache-Control' => 'private, no-store, max-age=0',
+                'X-Content-Type-Options' => 'nosniff',
+                'X-Frame-Options' => 'SAMEORIGIN',
+            ],
+            'inline',
         );
     }
 }

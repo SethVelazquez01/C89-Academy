@@ -10,6 +10,7 @@ use App\Models\TeamInvitation;
 use App\Models\User;
 use App\Notifications\Teams\OrganizationAccountCreated;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
@@ -246,6 +247,8 @@ test('el administrador crea usuarios desde el CRUD de su organización', functio
         ->assertSeeHtml('data-test="create-organization-user-button"')
         ->set('newUserName', 'Colaborador desde CRUD')
         ->set('newUserEmail', 'crud@example.com')
+        ->set('newUserPassword', 'Password-local-2026')
+        ->set('newUserPasswordConfirmation', 'Password-local-2026')
         ->set('newUserRole', TeamRole::Member->value)
         ->call('createOrganizationUser')
         ->assertHasNoErrors()
@@ -254,8 +257,9 @@ test('el administrador crea usuarios desde el CRUD de su organización', functio
 
     $createdUser = User::query()->where('email', 'crud@example.com')->firstOrFail();
 
-    expect($createdUser->teamRole($team))->toBe(TeamRole::Member);
-    Notification::assertSentTo($createdUser, OrganizationAccountCreated::class);
+    expect($createdUser->teamRole($team))->toBe(TeamRole::Member)
+        ->and(Hash::check('Password-local-2026', $createdUser->password))->toBeTrue();
+    Notification::assertNothingSent();
 });
 
 test('el colaborador no ve ni puede usar el alta directa de usuarios', function () {
@@ -327,6 +331,8 @@ test('el Platform Owner crea otro administrador desde la vista global', function
         ->call('showOrganizationMembersModal', $team->id)
         ->set('ownerAdministratorName', 'Segundo Administrador')
         ->set('ownerAdministratorEmail', 'segundo-admin@example.com')
+        ->set('ownerAdministratorPassword', 'Password-local-2026')
+        ->set('ownerAdministratorPasswordConfirmation', 'Password-local-2026')
         ->call('createOrganizationAdministrator')
         ->assertHasNoErrors()
         ->assertSee('Segundo Administrador')
@@ -335,8 +341,9 @@ test('el Platform Owner crea otro administrador desde la vista global', function
     $createdAdministrator = User::query()->where('email', 'segundo-admin@example.com')->firstOrFail();
 
     expect($createdAdministrator->teamRole($team))->toBe(TeamRole::Admin)
+        ->and(Hash::check('Password-local-2026', $createdAdministrator->password))->toBeTrue()
         ->and($platformOwner->belongsToTeam($team))->toBeFalse();
-    Notification::assertSentTo($createdAdministrator, OrganizationAccountCreated::class);
+    Notification::assertNothingSent();
 });
 
 test('usuarios regulares no pueden abrir la vista global de miembros', function () {

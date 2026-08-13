@@ -123,16 +123,18 @@ it('replaces a PDF and removes the previously stored file', function () {
     Storage::disk('local')->assertExists((string) $lesson->resource_path);
 });
 
-it('allows an administrator to download a private PDF', function () {
+it('allows an administrator to view a private PDF inline', function () {
     $lesson = createStoredDocumentLesson($this->courseModule);
 
     $this->actingAs($this->administrator)
         ->get(documentDownloadRoute($this->team, $this->course, $this->courseModule, $lesson))
         ->assertOk()
-        ->assertDownload('manual.pdf');
+        ->assertHeader('content-type', 'application/pdf')
+        ->assertHeader('content-disposition', 'inline; filename=manual.pdf')
+        ->assertHeader('cache-control', 'max-age=0, no-store, private');
 });
 
-it('requires an enrollment before a collaborator can download a private PDF', function () {
+it('requires an enrollment before a collaborator can view a private PDF', function () {
     $lesson = createStoredDocumentLesson($this->courseModule);
     $route = documentDownloadRoute($this->team, $this->course, $this->courseModule, $lesson);
 
@@ -148,7 +150,7 @@ it('requires an enrollment before a collaborator can download a private PDF', fu
     $this->actingAs($this->collaborator)
         ->get($route)
         ->assertOk()
-        ->assertDownload('manual.pdf');
+        ->assertHeader('content-disposition', 'inline; filename=manual.pdf');
 });
 
 it('returns not found when the private file is missing', function () {

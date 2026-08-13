@@ -101,15 +101,21 @@
             @else
                 <div class="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
                     @foreach ($availableCourses as $course)
-                        @php($enrollment = $enrollmentsByCourse->get($course->id))
+                        @php
+                            $enrollment = $enrollmentsByCourse->get($course->id);
+                            $completedLessons = (int) ($enrollment?->completed_published_lessons_count ?? 0);
+                            $totalLessons = (int) ($course->published_lessons_count ?? 0);
+                            $progressStatus = $enrollment?->progressStatus($completedLessons, $totalLessons);
+                            $progressPercentage = $enrollment?->progressPercentage($completedLessons, $totalLessons) ?? 0;
+                        @endphp
 
                         <article class="flex flex-col rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
                             <div class="flex items-start justify-between gap-3">
                                 @if ($enrollment === null)
                                     <flux:badge color="green">Disponible</flux:badge>
                                 @else
-                                    <flux:badge color="{{ $enrollment->status === \App\Enums\EnrollmentStatus::Completed ? 'amber' : 'blue' }}">
-                                        {{ $enrollment->status->label() }}
+                                    <flux:badge :color="$progressStatus->color()">
+                                        {{ $progressStatus->label() }}
                                     </flux:badge>
                                 @endif
 
@@ -119,6 +125,28 @@
                             </div>
                             <h3 class="mt-5 text-lg font-semibold text-zinc-950 dark:text-white">{{ $course->title }}</h3>
                             <p class="mt-2 flex-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{{ $course->summary ?? 'Consulta próximamente el contenido de este curso.' }}</p>
+
+                            @if ($enrollment !== null)
+                                <div class="mt-4 space-y-3 rounded-lg bg-black p-3 ">
+                                    <div class="flex flex-wrap gap-2">
+                                        <flux:badge :color="$enrollment->is_required ? 'amber' : 'blue'">
+                                            {{ $enrollment->is_required ? 'Obligatorio' : 'Opcional' }}
+                                        </flux:badge>
+                                        @if ($enrollment->due_at)
+                                            <flux:badge color="purple">Límite: {{ $enrollment->due_at->format('d/m/Y') }}</flux:badge>
+                                        @endif
+                                    </div>
+                                    <div>
+                                        <div class="flex justify-between text-xs text-zinc-600 dark:text-zinc-300">
+                                            <span>{{ $totalLessons > 0 ? $completedLessons.' de '.$totalLessons.' lecciones' : 'Sin lecciones publicadas' }}</span>
+                                            <span class="font-semibold">{{ $progressPercentage }}%</span>
+                                        </div>
+                                        <div class="mt-2 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
+                                            <div class="h-full rounded-full bg-[#63b32e]" style="width: {{ $progressPercentage }}%"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            @endif
 
                             @if (! $canSelfEnroll)
                                 <a

@@ -51,6 +51,10 @@ new class extends Component
 
     public string $newUserEmail = '';
 
+    public string $newUserPassword = '';
+
+    public string $newUserPasswordConfirmation = '';
+
     public string $newUserRole = 'member';
 
     public bool $isCurrentTeam = false;
@@ -176,15 +180,21 @@ new class extends Component
 
     public function createOrganizationUser(ProvisionOrganizationUser $provisionOrganizationUser): void
     {
+        Gate::authorize('addMember', $this->teamModel);
+
         $validated = $this->validate([
             'newUserName' => ['required', 'string', 'max:255'],
             'newUserEmail' => ['required', 'string', 'email', 'max:255'],
+            'newUserPassword' => ['required', 'string', 'min:8', 'confirmed:newUserPasswordConfirmation'],
             'newUserRole' => ['required', 'string', Rule::in(TeamRole::assignableValues())],
         ], [
             'newUserName.required' => 'El nombre es obligatorio.',
             'newUserName.max' => 'El nombre no puede superar 255 caracteres.',
             'newUserEmail.required' => 'El correo electrónico es obligatorio.',
             'newUserEmail.email' => 'El correo electrónico no tiene un formato válido.',
+            'newUserPassword.required' => 'La contraseña es obligatoria.',
+            'newUserPassword.min' => 'La contraseña debe tener al menos 8 caracteres.',
+            'newUserPassword.confirmed' => 'La confirmación de contraseña no coincide.',
             'newUserRole.in' => 'El rol seleccionado no es válido.',
         ]);
 
@@ -195,6 +205,7 @@ new class extends Component
                 $validated['newUserName'],
                 $validated['newUserEmail'],
                 $validated['newUserRole'],
+                $validated['newUserPassword'],
             );
         } catch (ValidationException $exception) {
             $errors = $exception->errors();
@@ -202,19 +213,20 @@ new class extends Component
             throw ValidationException::withMessages([
                 'newUserName' => $errors['name'] ?? [],
                 'newUserEmail' => $errors['email'] ?? [],
+                'newUserPassword' => $errors['password'] ?? [],
                 'newUserRole' => $errors['role'] ?? [],
             ]);
         }
 
         Flux::modal('create-organization-user')->close();
 
-        $this->reset('newUserName', 'newUserEmail', 'newUserRole');
+        $this->reset('newUserName', 'newUserEmail', 'newUserPassword', 'newUserPasswordConfirmation', 'newUserRole');
         $this->newUserRole = TeamRole::Member->value;
         $this->populateTeamData();
 
         Flux::toast(
             variant: 'success',
-            text: 'Usuario agregado. Si la identidad es nueva, recibirá un correo para establecer su contraseña.',
+            text: 'Usuario creado y listo para iniciar sesión.',
         );
     }
 
@@ -689,12 +701,12 @@ new class extends Component
     @endif
 
     @if ($this->permissions->canAddMember)
-        <flux:modal name="create-organization-user" :show="$errors->hasAny(['newUserName', 'newUserEmail', 'newUserRole'])" focusable class="max-w-lg">
+        <flux:modal name="create-organization-user" :show="$errors->hasAny(['newUserName', 'newUserEmail', 'newUserPassword', 'newUserRole'])" focusable class="max-w-2xl">
             <form wire:submit="createOrganizationUser" class="space-y-6">
                 <div>
                     <flux:heading size="lg">Crear usuario de la organización</flux:heading>
                     <flux:subheading>
-                        Si el correo es nuevo, la persona recibirá un enlace para establecer su contraseña. Si ya existe, se reutilizará su identidad global.
+                        La cuenta quedará lista para iniciar sesión. Si el correo ya existe, se reutilizará su identidad y conservará su contraseña actual.
                     </flux:subheading>
                 </div>
 
@@ -713,6 +725,24 @@ new class extends Component
                         required
                         data-test="new-organization-user-email"
                     />
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <flux:input
+                            wire:model="newUserPassword"
+                            label="Contraseña"
+                            type="password"
+                            viewable
+                            required
+                            data-test="new-organization-user-password"
+                        />
+                        <flux:input
+                            wire:model="newUserPasswordConfirmation"
+                            label="Confirmar contraseña"
+                            type="password"
+                            viewable
+                            required
+                            data-test="new-organization-user-password-confirmation"
+                        />
+                    </div>
                     <flux:select wire:model="newUserRole" label="Rol" data-test="new-organization-user-role">
                         @foreach ($availableRoles as $role)
                             <flux:select.option value="{{ $role['value'] }}">{{ $role['label'] }}</flux:select.option>

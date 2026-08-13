@@ -77,7 +77,7 @@ it('allows an administrator to create a video lesson from a secure URL', functio
         ])
         ->set('lessonTitle', 'Video de seguridad')
         ->set('lessonType', LessonType::Video->value)
-        ->set('lessonExternalUrl', 'https://video.example.com/seguridad')
+        ->set('lessonExternalUrl', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ')
         ->set('lessonEstimatedDurationMinutes', 12)
         ->call('createLesson')
         ->assertHasNoErrors()
@@ -88,7 +88,7 @@ it('allows an administrator to create a video lesson from a secure URL', functio
         'title' => 'Video de seguridad',
         'type' => LessonType::Video->value,
         'content' => null,
-        'external_url' => 'https://video.example.com/seguridad',
+        'external_url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
     ]);
 });
 
@@ -204,6 +204,19 @@ it('requires a valid web URL for video and link lessons', function () {
         ->set('lessonExternalUrl', 'esto-no-es-una-url')
         ->call('createLesson')
         ->assertHasErrors(['lessonExternalUrl' => 'url']);
+});
+
+it('rejects video URLs from providers that cannot be embedded safely', function () {
+    Livewire::actingAs($this->administrator)
+        ->test('pages::admin.courses.modules.lessons', [
+            'course' => $this->course->slug,
+            'courseModule' => $this->courseModule->id,
+        ])
+        ->set('lessonTitle', 'Video no compatible')
+        ->set('lessonType', LessonType::Video->value)
+        ->set('lessonExternalUrl', 'https://example.com/video')
+        ->call('createLesson')
+        ->assertHasErrors(['lessonExternalUrl']);
 });
 
 it('does not resolve a module from another course', function () {

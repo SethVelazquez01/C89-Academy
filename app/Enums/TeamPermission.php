@@ -17,6 +17,7 @@ enum TeamPermission: string
 
     case CreateCourse = 'course:create';
     case UpdateCourse = 'course:update';
+    case AssignCourse = 'course:assign';
     case PublishCourse = 'course:publish';
     case DeleteCourse = 'course:delete';
 }

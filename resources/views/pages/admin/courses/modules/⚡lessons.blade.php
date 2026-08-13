@@ -4,6 +4,8 @@ use App\Enums\LessonType;
 use App\Models\Course;
 use App\Models\CourseModule;
 use App\Models\Lesson;
+use App\Rules\EmbeddableVideoUrl;
+use App\Rules\SafePowerPointPresentation;
 use Flux\Flux;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
@@ -78,12 +80,41 @@ new class extends Component
                     LessonType::Text->value,
                     LessonType::Video->value,
                     LessonType::Document->value,
+                    LessonType::Presentation->value,
+                    LessonType::Image->value,
                     LessonType::Link->value,
                 ]),
             ],
-            'lessonContent' => ['nullable', 'string', 'max:100000', 'required_if:lessonType,text'],
-            'lessonExternalUrl' => ['nullable', 'url:http,https', 'max:2048', 'required_if:lessonType,video,link'],
-            'lessonDocument' => ['nullable', 'file', 'mimes:pdf', 'max:20480', 'required_if:lessonType,document'],
+            'lessonContent' => [
+                'nullable',
+                'string',
+                'max:100000',
+                'required_if:lessonType,text',
+                Rule::when($this->lessonType === LessonType::Image->value, ['max:5000']),
+            ],
+            'lessonExternalUrl' => [
+                'nullable',
+                'url:https',
+                'max:2048',
+                'required_if:lessonType,video,link',
+                Rule::when(
+                    $this->lessonType === LessonType::Video->value,
+                    [new EmbeddableVideoUrl],
+                ),
+            ],
+            'lessonDocument' => [
+                Rule::requiredIf($this->isResourceType($this->lessonType)),
+                'nullable',
+                'file',
+                Rule::when($this->lessonType === LessonType::Document->value, ['mimes:pdf', 'max:20480']),
+                Rule::when($this->lessonType === LessonType::Presentation->value, ['max:30720', new SafePowerPointPresentation]),
+                Rule::when($this->lessonType === LessonType::Image->value, [
+                    'image',
+                    'mimes:jpg,jpeg,png,webp',
+                    'max:10240',
+                    'dimensions:max_width=8000,max_height=8000',
+                ]),
+            ],
             'lessonEstimatedDurationMinutes' => ['nullable', 'integer', 'min:1', 'max:1440'],
         ]);
 
@@ -91,16 +122,18 @@ new class extends Component
         $lessonType = LessonType::from($validated['lessonType']);
         $resource = null;
 
-        if ($lessonType === LessonType::Document) {
+        if ($this->isResourceType($lessonType)) {
             abort_unless($this->lessonDocument instanceof TemporaryUploadedFile, 422);
-            $resource = $this->storeDocument($this->lessonDocument);
+            $resource = $this->storeResource($this->lessonDocument, $lessonType);
         }
 
         try {
             $this->courseModuleModel->lessons()->create([
                 'title' => $validated['lessonTitle'],
                 'type' => $lessonType,
-                'content' => $lessonType === LessonType::Text ? $validated['lessonContent'] : null,
+                'content' => in_array($lessonType, [LessonType::Text, LessonType::Image], true)
+                    ? $validated['lessonContent']
+                    : null,
                 'resource_disk' => $resource['disk'] ?? null,
                 'resource_path' => $resource['path'] ?? null,
                 'resource_name' => $resource['name'] ?? null,
@@ -166,20 +199,43 @@ new class extends Component
                     LessonType::Text->value,
                     LessonType::Video->value,
                     LessonType::Document->value,
+                    LessonType::Presentation->value,
+                    LessonType::Image->value,
                     LessonType::Link->value,
                 ]),
             ],
-            'editingLessonContent' => ['nullable', 'string', 'max:100000', 'required_if:editingLessonType,text'],
-            'editingLessonExternalUrl' => ['nullable', 'url:http,https', 'max:2048', 'required_if:editingLessonType,video,link'],
+            'editingLessonContent' => [
+                'nullable',
+                'string',
+                'max:100000',
+                'required_if:editingLessonType,text',
+                Rule::when($this->editingLessonType === LessonType::Image->value, ['max:5000']),
+            ],
+            'editingLessonExternalUrl' => [
+                'nullable',
+                'url:https',
+                'max:2048',
+                'required_if:editingLessonType,video,link',
+                Rule::when(
+                    $this->editingLessonType === LessonType::Video->value,
+                    [new EmbeddableVideoUrl],
+                ),
+            ],
             'editingLessonDocument' => [
                 Rule::requiredIf(
-                    $this->editingLessonType === LessonType::Document->value
-                        && blank($lesson->resource_path),
+                    $this->isResourceType($this->editingLessonType)
+                        && ($lesson->type->value !== $this->editingLessonType || blank($lesson->resource_path)),
                 ),
                 'nullable',
                 'file',
-                'mimes:pdf',
-                'max:20480',
+                Rule::when($this->editingLessonType === LessonType::Document->value, ['mimes:pdf', 'max:20480']),
+                Rule::when($this->editingLessonType === LessonType::Presentation->value, ['max:30720', new SafePowerPointPresentation]),
+                Rule::when($this->editingLessonType === LessonType::Image->value, [
+                    'image',
+                    'mimes:jpg,jpeg,png,webp',
+                    'max:10240',
+                    'dimensions:max_width=8000,max_height=8000',
+                ]),
             ],
             'editingLessonEstimatedDurationMinutes' => ['nullable', 'integer', 'min:1', 'max:1440'],
         ]);
@@ -189,9 +245,9 @@ new class extends Component
         $oldPath = $lesson->resource_path;
         $resource = null;
 
-        if ($lessonType === LessonType::Document
+        if ($this->isResourceType($lessonType)
             && $this->editingLessonDocument instanceof TemporaryUploadedFile) {
-            $resource = $this->storeDocument($this->editingLessonDocument);
+            $resource = $this->storeResource($this->editingLessonDocument, $lessonType);
         }
 
         $resourceData = [
@@ -202,7 +258,7 @@ new class extends Component
             'resource_size' => null,
         ];
 
-        if ($lessonType === LessonType::Document) {
+        if ($this->isResourceType($lessonType)) {
             $resourceData = $resource !== null
                 ? [
                     'resource_disk' => $resource['disk'],
@@ -224,7 +280,9 @@ new class extends Component
             $lesson->update([
                 'title' => $validated['editingLessonTitle'],
                 'type' => $lessonType,
-                'content' => $lessonType === LessonType::Text ? $validated['editingLessonContent'] : null,
+                'content' => in_array($lessonType, [LessonType::Text, LessonType::Image], true)
+                    ? $validated['editingLessonContent']
+                    : null,
                 ...$resourceData,
                 'external_url' => in_array($lessonType, [LessonType::Video, LessonType::Link], true)
                     ? $validated['editingLessonExternalUrl']
@@ -241,7 +299,7 @@ new class extends Component
 
         if (filled($oldDisk)
             && filled($oldPath)
-            && ($lessonType !== LessonType::Document || $resource !== null)) {
+            && (! $this->isResourceType($lessonType) || $resource !== null)) {
             $this->deleteStoredResource((string) $oldDisk, (string) $oldPath);
         }
 
@@ -307,12 +365,26 @@ new class extends Component
     }
 
     /**
-     * Store a PDF on the private local disk.
+     * Store a lesson file on the private local disk.
      *
      * @return array{disk: string, path: string, name: string, mime: string, size: int}
      */
-    private function storeDocument(TemporaryUploadedFile $document): array
+    private function storeResource(TemporaryUploadedFile $document, LessonType $lessonType): array
     {
+        [$extension, $mime] = match ($lessonType) {
+            LessonType::Document => ['pdf', 'application/pdf'],
+            LessonType::Presentation => [
+                'pptx',
+                'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            ],
+            LessonType::Image => match ($document->getMimeType()) {
+                'image/jpeg' => ['jpg', 'image/jpeg'],
+                'image/png' => ['png', 'image/png'],
+                'image/webp' => ['webp', 'image/webp'],
+                default => throw new \RuntimeException('El formato de imagen no es compatible.'),
+            },
+            default => throw new \RuntimeException('El tipo de recurso no es compatible.'),
+        };
         $directory = implode('/', [
             'course-resources',
             'team-'.$this->courseModel->team_id,
@@ -321,7 +393,7 @@ new class extends Component
         ]);
         $path = $document->storeAs(
             $directory,
-            Str::uuid().'.pdf',
+            Str::uuid().'.'.$extension,
             'local',
         );
 
@@ -333,9 +405,20 @@ new class extends Component
             'disk' => 'local',
             'path' => $path,
             'name' => $document->getClientOriginalName(),
-            'mime' => $document->getMimeType() ?? 'application/pdf',
+            'mime' => $mime,
             'size' => (int) $document->getSize(),
         ];
+    }
+
+    private function isResourceType(LessonType|string $lessonType): bool
+    {
+        $value = $lessonType instanceof LessonType ? $lessonType->value : $lessonType;
+
+        return in_array($value, [
+            LessonType::Document->value,
+            LessonType::Presentation->value,
+            LessonType::Image->value,
+        ], true);
     }
 
     private function deleteStoredResource(string $disk, string $path): void
@@ -384,7 +467,7 @@ new class extends Component
     <section class="space-y-5 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 md:p-8">
         <div>
             <flux:heading size="lg">Nueva lección</flux:heading>
-            <flux:subheading class="mt-1">Agrega contenido escrito, un video por URL o un enlace externo.</flux:subheading>
+            <flux:subheading class="mt-1">Agrega contenido escrito, video, PDF, PowerPoint, una imagen o un enlace externo.</flux:subheading>
         </div>
 
         <form wire:submit="createLesson" class="space-y-4 rounded-xl border border-dashed border-zinc-300 p-5 dark:border-zinc-700">
@@ -394,6 +477,8 @@ new class extends Component
                 <flux:select.option value="text">Texto</flux:select.option>
                 <flux:select.option value="video">Video por URL</flux:select.option>
                 <flux:select.option value="document">Documento PDF</flux:select.option>
+                <flux:select.option value="presentation">Presentación PowerPoint</flux:select.option>
+                <flux:select.option value="image">Imagen grande</flux:select.option>
                 <flux:select.option value="link">Enlace externo</flux:select.option>
             </flux:select>
 
@@ -406,24 +491,53 @@ new class extends Component
                     required
                     data-test="lesson-content-input"
                 />
-            @elseif ($lessonType === LessonType::Document->value)
+            @elseif (in_array($lessonType, [LessonType::Document->value, LessonType::Presentation->value, LessonType::Image->value], true))
+                @php
+                    $resourceInput = match ($lessonType) {
+                        LessonType::Presentation->value => [
+                            'label' => 'Archivo PowerPoint (.pptx)',
+                            'description' => 'Solo .pptx, máximo 30 MB.',
+                            'accept' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation,.pptx',
+                        ],
+                        LessonType::Image->value => [
+                            'label' => 'Imagen de la lección',
+                            'description' => 'Una imagen JPG, PNG o WebP, máximo 10 MB.',
+                            'accept' => 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp',
+                        ],
+                        default => [
+                            'label' => 'Archivo PDF',
+                            'description' => 'Máximo 20 MB.',
+                            'accept' => 'application/pdf,.pdf',
+                        ],
+                    };
+                @endphp
                 <flux:input
                     wire:model="lessonDocument"
-                    label="Archivo PDF"
-                    description="Máximo 20 MB. Se almacenará de forma privada."
+                    label="{{ $resourceInput['label'] }}"
+                    description="{{ $resourceInput['description'] }} Se almacenará de forma privada."
                     type="file"
-                    accept="application/pdf,.pdf"
+                    accept="{{ $resourceInput['accept'] }}"
                     required
                     data-test="lesson-document-input"
                 />
                 <p wire:loading wire:target="lessonDocument" class="text-sm text-zinc-500 dark:text-zinc-400">
                     Cargando documento…
                 </p>
+                @if ($lessonType === LessonType::Image->value)
+                    <flux:textarea
+                        wire:model="lessonContent"
+                        label="Descripción de la imagen"
+                        description="Se mostrará debajo de la imagen. El nombre del archivo no será visible."
+                        rows="3"
+                        maxlength="5000"
+                        data-test="lesson-image-description-input"
+                    />
+                @endif
             @else
                 <flux:input
                     wire:model="lessonExternalUrl"
                     label="{{ $lessonType === LessonType::Video->value ? 'URL del video' : 'URL del enlace' }}"
-                    description="Utiliza una dirección segura que comience con https://"
+                    description="{{ $lessonType === LessonType::Video->value ? 'Enlace HTTPS de YouTube o Vimeo.' : 'Utiliza una dirección segura que comience con https://' }}"
                     type="url"
                     required
                     data-test="lesson-url-input"
@@ -471,13 +585,35 @@ new class extends Component
                                     <flux:select.option value="text">Texto</flux:select.option>
                                     <flux:select.option value="video">Video por URL</flux:select.option>
                                     <flux:select.option value="document">Documento PDF</flux:select.option>
+                                    <flux:select.option value="presentation">Presentación PowerPoint</flux:select.option>
+                                    <flux:select.option value="image">Imagen grande</flux:select.option>
                                     <flux:select.option value="link">Enlace externo</flux:select.option>
                                 </flux:select>
 
                                 @if ($editingLessonType === LessonType::Text->value)
                                     <flux:textarea wire:model="editingLessonContent" label="Contenido" rows="8" required />
-                                @elseif ($editingLessonType === LessonType::Document->value)
-                                    @if ($lesson->resource_path)
+                                @elseif (in_array($editingLessonType, [LessonType::Document->value, LessonType::Presentation->value, LessonType::Image->value], true))
+                                    @php
+                                        $resourceTypeChanged = $lesson->type->value !== $editingLessonType;
+                                        $editingResourceInput = match ($editingLessonType) {
+                                            LessonType::Presentation->value => [
+                                                'label' => 'Archivo PowerPoint (.pptx)',
+                                                'description' => 'Solo .pptx, máximo 30 MB.',
+                                                'accept' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation,.pptx',
+                                            ],
+                                            LessonType::Image->value => [
+                                                'label' => 'Imagen de la lección',
+                                                'description' => 'Una imagen JPG, PNG o WebP, máximo 10 MB.',
+                                                'accept' => 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp',
+                                            ],
+                                            default => [
+                                                'label' => 'Archivo PDF',
+                                                'description' => 'Máximo 20 MB.',
+                                                'accept' => 'application/pdf,.pdf',
+                                            ],
+                                        };
+                                    @endphp
+                                    @if ($lesson->resource_path && ! $resourceTypeChanged)
                                         <a
                                             href="{{ route('lessons.resource', [
                                                 'current_team' => $courseModel->team,
@@ -487,25 +623,35 @@ new class extends Component
                                             ]) }}"
                                             class="inline-flex text-sm font-medium text-[#3d8d25] hover:underline dark:text-[#8bd15a]"
                                         >
-                                            Descargar {{ $lesson->resource_name ?? 'documento actual' }}
+                                            {{ $editingLessonType === LessonType::Image->value ? 'Ver imagen actual' : 'Ver '.($lesson->resource_name ?? 'archivo actual') }}
                                         </a>
                                     @endif
 
                                     <flux:input
                                         wire:model="editingLessonDocument"
-                                        label="{{ $lesson->resource_path ? 'Reemplazar PDF (opcional)' : 'Archivo PDF' }}"
-                                        description="Máximo 20 MB."
+                                        label="{{ $lesson->resource_path && ! $resourceTypeChanged ? 'Reemplazar archivo (opcional)' : $editingResourceInput['label'] }}"
+                                        description="{{ $editingResourceInput['description'] }} Se almacenará de forma privada."
                                         type="file"
-                                        accept="application/pdf,.pdf"
-                                        :required="! $lesson->resource_path"
+                                        accept="{{ $editingResourceInput['accept'] }}"
+                                        :required="! $lesson->resource_path || $resourceTypeChanged"
                                     />
                                     <p wire:loading wire:target="editingLessonDocument" class="text-sm text-zinc-500 dark:text-zinc-400">
                                         Cargando documento…
                                     </p>
+                                    @if ($editingLessonType === LessonType::Image->value)
+                                        <flux:textarea
+                                            wire:model="editingLessonContent"
+                                            label="Descripción de la imagen"
+                                            description="Se mostrará debajo de la imagen. El nombre del archivo no será visible."
+                                            rows="3"
+                                            maxlength="5000"
+                                        />
+                                    @endif
                                 @else
                                     <flux:input
                                         wire:model="editingLessonExternalUrl"
                                         label="{{ $editingLessonType === LessonType::Video->value ? 'URL del video' : 'URL del enlace' }}"
+                                        description="{{ $editingLessonType === LessonType::Video->value ? 'Enlace HTTPS de YouTube o Vimeo.' : 'Utiliza una dirección segura que comience con https://' }}"
                                         type="url"
                                         required
                                     />
@@ -539,7 +685,10 @@ new class extends Component
                                     <h3 class="mt-2 text-lg font-semibold text-zinc-950 dark:text-white">{{ $lesson->title }}</h3>
                                     @if ($lesson->type === LessonType::Text)
                                         <p class="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{{ Str::limit($lesson->content ?? '', 180) }}</p>
-                                    @elseif ($lesson->type === LessonType::Document)
+                                    @elseif ($lesson->type === LessonType::Image)
+                                        @if (filled($lesson->content))
+                                            <p class="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{{ Str::limit($lesson->content, 180) }}</p>
+                                        @endif
                                         <a
                                             href="{{ route('lessons.resource', [
                                                 'current_team' => $courseModel->team,
@@ -549,8 +698,21 @@ new class extends Component
                                             ]) }}"
                                             class="mt-2 inline-flex items-center gap-2 text-sm font-medium text-[#3d8d25] hover:underline dark:text-[#8bd15a]"
                                         >
-                                            <flux:icon name="arrow-down-tray" class="size-4" />
-                                            Descargar {{ $lesson->resource_name ?? 'documento PDF' }}
+                                            <flux:icon name="eye" class="size-4" />
+                                            Ver imagen
+                                        </a>
+                                    @elseif (in_array($lesson->type, [LessonType::Document, LessonType::Presentation], true))
+                                        <a
+                                            href="{{ route('lessons.resource', [
+                                                'current_team' => $courseModel->team,
+                                                'course' => $courseModel,
+                                                'courseModule' => $courseModuleModel,
+                                                'lesson' => $lesson,
+                                            ]) }}"
+                                            class="mt-2 inline-flex items-center gap-2 text-sm font-medium text-[#3d8d25] hover:underline dark:text-[#8bd15a]"
+                                        >
+                                            <flux:icon name="eye" class="size-4" />
+                                            Ver {{ $lesson->resource_name ?? 'archivo de la lección' }}
                                         </a>
                                     @else
                                         <a

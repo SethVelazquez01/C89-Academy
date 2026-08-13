@@ -24,6 +24,10 @@ class CourseEnrollmentFactory extends Factory
             'course_id' => Course::factory()->published(),
             'user_id' => User::factory(),
             'assigned_by' => null,
+            'is_required' => false,
+            'due_at' => null,
+            'last_cancelled_by' => null,
+            'last_cancelled_at' => null,
             'status' => EnrollmentStatus::Active,
             'enrolled_at' => now(),
             'completed_at' => null,
@@ -49,6 +53,7 @@ class CourseEnrollmentFactory extends Factory
         return $this->state(fn (array $attributes) => [
             'status' => EnrollmentStatus::Cancelled,
             'completed_at' => null,
+            'last_cancelled_at' => now(),
         ]);
     }
 }

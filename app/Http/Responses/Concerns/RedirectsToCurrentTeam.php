@@ -11,6 +11,16 @@ trait RedirectsToCurrentTeam
 {
     protected function redirectPathForCurrentTeam(Request $request, string $redirect): string
     {
+        $user = $request->user();
+
+        abort_unless($user instanceof User, 403);
+
+        if ($user->isPlatformOwner()) {
+            $request->session()->forget('url.intended');
+
+            return route('platform.dashboard', absolute: false);
+        }
+
         $team = $this->currentTeam($request);
 
         $request->session()->forget('url.intended');

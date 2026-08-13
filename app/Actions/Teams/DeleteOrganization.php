@@ -26,13 +26,18 @@ class DeleteOrganization
             $hasDependencies = $lockedOrganization->memberships()
                 ->whereIn('status', [MembershipStatus::Active->value, MembershipStatus::Suspended->value])
                 ->exists()
-                || $lockedOrganization->courses()->withTrashed()->exists()
-                || $lockedOrganization->invitations()->exists()
+                || $lockedOrganization->courses()->exists()
+                || $lockedOrganization->invitations()
+                    ->whereNull('accepted_at')
+                    ->where(fn ($query) => $query
+                        ->whereNull('expires_at')
+                        ->orWhere('expires_at', '>', now()))
+                    ->exists()
                 || User::query()->where('current_team_id', $lockedOrganization->id)->exists();
 
             if ($hasDependencies) {
                 throw ValidationException::withMessages([
-                    'organization' => [__('This organization cannot be deleted while it has members, courses, or invitations.')],
+                    'organization' => ['La organización no puede eliminarse mientras tenga miembros activos o suspendidos, cursos activos o invitaciones pendientes.'],
                 ]);
             }
 

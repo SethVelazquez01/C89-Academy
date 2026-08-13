@@ -8,6 +8,10 @@ use Illuminate\Support\Facades\Route;
 
 Route::redirect('/', '/login')->name('home');
 
+Route::livewire('platform', 'pages::platform.dashboard')
+    ->middleware(['auth', 'verified'])
+    ->name('platform.dashboard');
+
 Route::prefix('{current_team}')
     ->middleware(['auth', 'verified', EnsureTeamMembership::class])
     ->group(function () {
@@ -27,6 +31,10 @@ Route::prefix('{current_team}')
             ->group(function () {
                 Route::livewire('courses', 'pages::admin.courses.index')->name('courses.index');
                 Route::livewire('courses/create', 'pages::admin.courses.create')->name('courses.create');
+                Route::livewire(
+                    'courses/{course}/assignments',
+                    'pages::admin.courses.assignments',
+                )->name('courses.assignments');
                 Route::livewire('courses/{course}/edit', 'pages::admin.courses.edit')->name('courses.edit');
                 Route::livewire(
                     'courses/{course}/modules/{courseModule}/lessons',

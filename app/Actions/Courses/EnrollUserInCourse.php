@@ -27,6 +27,8 @@ final class EnrollUserInCourse
                     'course_id' => $course->id,
                     'user_id' => $user->id,
                     'assigned_by' => null,
+                    'is_required' => false,
+                    'due_at' => null,
                     'status' => EnrollmentStatus::Active,
                     'enrolled_at' => now(),
                     'completed_at' => null,
@@ -36,6 +38,8 @@ final class EnrollUserInCourse
             if ($enrollment->status === EnrollmentStatus::Cancelled) {
                 $enrollment->update([
                     'assigned_by' => null,
+                    'is_required' => false,
+                    'due_at' => null,
                     'status' => EnrollmentStatus::Active,
                     'enrolled_at' => now(),
                     'completed_at' => null,

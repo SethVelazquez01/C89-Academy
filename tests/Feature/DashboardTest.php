@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\EnrollmentProgressStatus;
 use App\Enums\EnrollmentStatus;
 use App\Enums\TeamRole;
 use App\Models\Course;
@@ -84,7 +85,7 @@ test('the dashboard displays the current enrollment status and learning totals',
     $this->actingAs($user)
         ->get(route('dashboard', ['current_team' => $team]))
         ->assertOk()
-        ->assertSee('En curso')
+        ->assertSee(EnrollmentProgressStatus::Pending->label())
         ->assertSee(EnrollmentStatus::Completed->label())
         ->assertSee('Continuar curso')
         ->assertSee('Revisar curso completado');

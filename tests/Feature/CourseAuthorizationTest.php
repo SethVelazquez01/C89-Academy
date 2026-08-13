@@ -2,6 +2,7 @@
 
 use App\Enums\TeamRole;
 use App\Models\Course;
+use App\Models\CourseEnrollment;
 use App\Models\Team;
 use App\Models\User;
 use Database\Seeders\C89OrganizationSeeder;
@@ -21,6 +22,7 @@ test('an administrator can manage courses in the current organization', function
     expect(Gate::forUser($this->administrator)->allows('create', Course::class))->toBeTrue()
         ->and(Gate::forUser($this->administrator)->allows('view', $course))->toBeTrue()
         ->and(Gate::forUser($this->administrator)->allows('update', $course))->toBeTrue()
+        ->and(Gate::forUser($this->administrator)->allows('assign', [CourseEnrollment::class, $course, $this->collaborator]))->toBeFalse()
         ->and(Gate::forUser($this->administrator)->allows('publish', $course))->toBeTrue()
         ->and(Gate::forUser($this->administrator)->allows('delete', $course))->toBeTrue()
         ->and(Gate::forUser($this->administrator)->allows('restore', $course))->toBeTrue()
@@ -36,8 +38,18 @@ test('a collaborator can view published courses but cannot manage them', functio
         ->and(Gate::forUser($this->collaborator)->allows('view', $draftCourse))->toBeFalse()
         ->and(Gate::forUser($this->collaborator)->allows('create', Course::class))->toBeFalse()
         ->and(Gate::forUser($this->collaborator)->allows('update', $publishedCourse))->toBeFalse()
+        ->and(Gate::forUser($this->collaborator)->allows('assign', [CourseEnrollment::class, $publishedCourse, $this->collaborator]))->toBeFalse()
         ->and(Gate::forUser($this->collaborator)->allows('publish', $publishedCourse))->toBeFalse()
         ->and(Gate::forUser($this->collaborator)->allows('delete', $publishedCourse))->toBeFalse();
+});
+
+test('an administrator can assign a published course to a collaborator', function () {
+    $publishedCourse = Course::factory()->for($this->team)->published()->create();
+
+    expect(Gate::forUser($this->administrator)->allows(
+        'assign',
+        [CourseEnrollment::class, $publishedCourse, $this->collaborator],
+    ))->toBeTrue();
 });
 
 test('an administrator cannot manage a course outside the current organization', function () {

@@ -54,7 +54,7 @@ class LessonFactory extends Factory
         return $this->state(fn (array $attributes) => [
             'type' => LessonType::Video,
             'content' => null,
-            'external_url' => 'https://example.com/training-video',
+            'external_url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
         ]);
     }
 
@@ -70,6 +70,40 @@ class LessonFactory extends Factory
             'resource_path' => 'course-resources/example.pdf',
             'resource_name' => 'example.pdf',
             'resource_mime' => 'application/pdf',
+            'resource_size' => 1024,
+            'external_url' => null,
+        ]);
+    }
+
+    /**
+     * Indicate that the lesson contains a private PowerPoint presentation.
+     */
+    public function presentation(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'type' => LessonType::Presentation,
+            'content' => null,
+            'resource_disk' => 'local',
+            'resource_path' => 'course-resources/example.pptx',
+            'resource_name' => 'example.pptx',
+            'resource_mime' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'resource_size' => 1024,
+            'external_url' => null,
+        ]);
+    }
+
+    /**
+     * Indicate that the lesson contains one private image.
+     */
+    public function image(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'type' => LessonType::Image,
+            'content' => null,
+            'resource_disk' => 'local',
+            'resource_path' => 'course-resources/example.webp',
+            'resource_name' => 'example.webp',
+            'resource_mime' => 'image/webp',
             'resource_size' => 1024,
             'external_url' => null,
         ]);

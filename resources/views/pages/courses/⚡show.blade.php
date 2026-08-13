@@ -13,6 +13,7 @@ use Flux\Flux;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
 use Livewire\Component;
 
 new class extends Component
@@ -69,6 +70,12 @@ new class extends Component
         $lesson = $this->findPublishedLesson($lessonId);
 
         Gate::authorize('view', $lesson);
+
+        if (! $this->canAccessLesson($lesson)) {
+            throw ValidationException::withMessages([
+                'lesson' => ['Completa las lecciones anteriores para continuar.'],
+            ]);
+        }
 
         $this->selectedLessonId = $lesson->id;
         $this->startLesson($lesson);
@@ -135,6 +142,27 @@ new class extends Component
             ->firstOrFail();
     }
 
+    private function canAccessLesson(Lesson $lesson): bool
+    {
+        $publishedLessons = $this->publishedLessons();
+        $lessonIndex = $publishedLessons->search(
+            fn (Lesson $candidate): bool => $candidate->id === $lesson->id,
+        );
+
+        if (! is_int($lessonIndex)) {
+            return false;
+        }
+
+        $completedLessonIds = $this->enrollment
+            ->lessonProgress()
+            ->whereNotNull('completed_at')
+            ->pluck('lesson_id');
+
+        return $publishedLessons
+            ->take($lessonIndex)
+            ->every(fn (Lesson $previousLesson): bool => $completedLessonIds->contains($previousLesson->id));
+    }
+
     /**
      * Get all visible lessons in course order.
      *
@@ -165,6 +193,16 @@ new class extends Component
             ->lessonProgress()
             ->get()
             ->keyBy('lesson_id');
+        $completedLessonIds = $progressByLesson
+            ->whereNotNull('completed_at')
+            ->keys();
+        $firstPendingLesson = $publishedLessons
+            ->first(fn (Lesson $lesson) => ! $completedLessonIds->contains($lesson->id));
+        $accessibleLessonIds = $completedLessonIds->values();
+
+        if ($firstPendingLesson instanceof Lesson) {
+            $accessibleLessonIds->push($firstPendingLesson->id);
+        }
         $completedLessonsCount = $progressByLesson
             ->whereNotNull('completed_at')
             ->count();
@@ -174,6 +212,22 @@ new class extends Component
             : 0;
         $currentLesson = $publishedLessons
             ->firstWhere('id', $this->selectedLessonId);
+        $currentProgress = $currentLesson instanceof Lesson
+            ? $progressByLesson->get($currentLesson->id)
+            : null;
+        $currentResourceUrl = $currentLesson instanceof Lesson
+            && in_array($currentLesson->type, [
+                LessonType::Document,
+                LessonType::Presentation,
+                LessonType::Image,
+            ], true)
+                ? route('lessons.resource', [
+                    'current_team' => $this->courseModel->team,
+                    'course' => $this->courseModel,
+                    'courseModule' => $currentLesson->courseModule,
+                    'lesson' => $currentLesson,
+                ])
+                : null;
 
         return $this->view([
             'courseModules' => $courseModules,
@@ -182,6 +236,9 @@ new class extends Component
             'totalLessonsCount' => $totalLessonsCount,
             'progressPercentage' => $progressPercentage,
             'currentLesson' => $currentLesson,
+            'currentVideoEmbed' => $currentLesson?->videoEmbed(),
+            'currentResourceUrl' => $currentResourceUrl,
+            'accessibleLessonIds' => $accessibleLessonIds,
         ])->title($this->courseModel->title);
     }
 };
@@ -225,7 +282,7 @@ new class extends Component
             <aside class="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-900 lg:sticky lg:top-6">
                 <div class="border-b border-zinc-200 p-5 dark:border-zinc-700">
                     <h2 class="font-semibold text-zinc-950 dark:text-white">Contenido del curso</h2>
-                    <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Selecciona una lección para continuar.</p>
+                    <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Avanza en orden. Cada lección se desbloquea al completar la anterior.</p>
                 </div>
 
                 <div class="max-h-[70vh] overflow-y-auto">
@@ -241,14 +298,18 @@ new class extends Component
                             <div class="p-2">
                                 @foreach ($courseModule->lessons as $lesson)
                                     @php($lessonProgress = $progressByLesson->get($lesson->id))
+                                    @php($lessonIsAccessible = $accessibleLessonIds->contains($lesson->id))
                                     <button
                                         type="button"
                                         wire:click="selectLesson({{ $lesson->id }})"
-                                        class="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition {{ $selectedLessonId === $lesson->id ? 'bg-[#63b32e]/15' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800' }}"
+                                        @disabled(! $lessonIsAccessible)
+                                        class="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition {{ $selectedLessonId === $lesson->id ? 'bg-[#63b32e]/15' : ($lessonIsAccessible ? 'hover:bg-zinc-100 dark:hover:bg-zinc-800' : 'cursor-not-allowed opacity-50') }}"
                                     >
                                         <span class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full {{ $lessonProgress?->completed_at ? 'bg-[#63b32e] text-white' : 'border border-zinc-300 text-zinc-500 dark:border-zinc-600' }}">
                                             @if ($lessonProgress?->completed_at)
                                                 <flux:icon name="check" class="size-4" />
+                                            @elseif (! $lessonIsAccessible)
+                                                <flux:icon name="lock-closed" class="size-3.5" />
                                             @else
                                                 <span class="text-xs">{{ $lesson->position }}</span>
                                             @endif
@@ -270,7 +331,11 @@ new class extends Component
                 </div>
             </aside>
 
-            <main class="min-w-0 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 md:p-8">
+            <main
+                wire:key="lesson-content-{{ $currentLesson?->id ?? 'none' }}"
+                x-data="presentationLesson(@js($currentLesson?->type->value), @js($currentResourceUrl))"
+                class="min-w-0 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 md:p-8"
+            >
                 @if ($currentLesson instanceof Lesson)
                     @php($currentProgress = $progressByLesson->get($currentLesson->id))
 
@@ -296,30 +361,92 @@ new class extends Component
                         @if ($currentLesson->type === LessonType::Text)
                             <div class="whitespace-pre-line text-base leading-8 text-zinc-700 dark:text-zinc-200">{{ $currentLesson->content }}</div>
                         @elseif ($currentLesson->type === LessonType::Document)
-                            <div class="rounded-2xl border border-zinc-200 p-6 text-center dark:border-zinc-700">
-                                <flux:icon name="document-arrow-down" class="mx-auto size-12 text-[#3d8d25] dark:text-[#8bd15a]" />
-                                <h3 class="mt-4 text-lg font-semibold text-zinc-950 dark:text-white">{{ $currentLesson->resource_name ?? 'Documento PDF' }}</h3>
-                                <p class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">Este archivo está protegido y requiere tu sesión activa.</p>
-                                <flux:button
-                                    :href="route('lessons.resource', [
+                            <div class="overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-700">
+                                <div class="border-b border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-800">
+                                    <p class="font-medium text-zinc-900 dark:text-white">{{ $currentLesson->resource_name ?? 'Documento PDF' }}</p>
+                                    <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Documento privado visible únicamente durante tu sesión.</p>
+                                </div>
+                                <iframe
+                                    src="{{ route('lessons.resource', [
                                         'current_team' => $courseModel->team,
                                         'course' => $courseModel,
                                         'courseModule' => $currentLesson->courseModule,
                                         'lesson' => $currentLesson,
-                                    ])"
-                                    variant="primary"
-                                    icon="arrow-down-tray"
-                                    class="mt-5"
-                                >
-                                    Descargar PDF
-                                </flux:button>
+                                    ]) }}#toolbar=0&navpanes=0"
+                                    title="{{ $currentLesson->resource_name ?? 'Documento de la lección' }}"
+                                    class="h-[70vh] min-h-[32rem] w-full bg-zinc-100 dark:bg-zinc-950"
+                                    loading="lazy"
+                                ></iframe>
                             </div>
+                        @elseif ($currentLesson->type === LessonType::Presentation)
+                            <div class="overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-700">
+                                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-800">
+                                    <div>
+                                        <p class="font-medium text-zinc-900 dark:text-white">{{ $currentLesson->resource_name ?? 'Presentación PowerPoint' }}</p>
+                                        <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Presentación privada procesada dentro de la plataforma.</p>
+                                    </div>
+                                    <span x-show="slideCount > 0" x-text="`Diapositiva ${currentSlide + 1} de ${slideCount}`" class="text-xs font-medium text-zinc-500 dark:text-zinc-400"></span>
+                                </div>
+
+                                <div class="relative min-h-[32rem] bg-zinc-100 dark:bg-zinc-950">
+                                    <div
+                                        x-show="presentationLoading"
+                                        class="absolute inset-0 z-10 flex items-center justify-center bg-zinc-100/90 text-sm text-zinc-600 dark:bg-zinc-950/90 dark:text-zinc-300"
+                                    >
+                                        Preparando la presentación…
+                                    </div>
+                                    <div
+                                        x-show="presentationError"
+                                        x-cloak
+                                        class="absolute inset-0 z-20 flex items-center justify-center p-8 text-center text-sm text-red-700 dark:text-red-300"
+                                    >
+                                        <span x-text="presentationError"></span>
+                                    </div>
+                                    <div
+                                        x-ref="presentationContainer"
+                                        wire:ignore
+                                        class="h-[70vh] min-h-[32rem] overflow-y-auto p-3 md:p-5"
+                                    ></div>
+                                </div>
+                            </div>
+                        @elseif ($currentLesson->type === LessonType::Image)
+                            <figure class="overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950">
+                                <img
+                                    src="{{ $currentResourceUrl }}"
+                                    alt="{{ $currentLesson->title }}"
+                                    class="mx-auto max-h-[75vh] w-full object-contain"
+                                    loading="lazy"
+                                    decoding="async"
+                                >
+                                @if (filled($currentLesson->content))
+                                    <figcaption class="border-t border-zinc-200 bg-white px-5 py-4 text-center text-sm leading-6 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+                                        {{ $currentLesson->content }}
+                                    </figcaption>
+                                @endif
+                            </figure>
+                        @elseif ($currentLesson->type === LessonType::Video)
+                            @if ($currentVideoEmbed)
+                                <div class="aspect-video overflow-hidden rounded-2xl bg-black shadow-sm" wire:key="video-{{ $currentLesson->id }}">
+                                    <iframe
+                                        src="{{ $currentVideoEmbed->embedUrl() }}"
+                                        title="Video: {{ $currentLesson->title }}"
+                                        class="size-full"
+                                        loading="lazy"
+                                        referrerpolicy="strict-origin-when-cross-origin"
+                                        sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
+                                        allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                                        allowfullscreen
+                                    ></iframe>
+                                </div>
+                            @else
+                                <div class="rounded-2xl border border-red-200 bg-red-50 p-6 text-center text-red-800 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-200">
+                                    El enlace del video no es compatible. Solicita al administrador un enlace de YouTube o Vimeo.
+                                </div>
+                            @endif
                         @else
                             <div class="rounded-2xl border border-zinc-200 p-6 text-center dark:border-zinc-700">
-                                <flux:icon :name="$currentLesson->type === LessonType::Video ? 'play-circle' : 'arrow-top-right-on-square'" class="mx-auto size-12 text-[#3d8d25] dark:text-[#8bd15a]" />
-                                <h3 class="mt-4 text-lg font-semibold text-zinc-950 dark:text-white">
-                                    {{ $currentLesson->type === LessonType::Video ? 'Video de la lección' : 'Recurso externo' }}
-                                </h3>
+                                <flux:icon name="arrow-top-right-on-square" class="mx-auto size-12 text-[#3d8d25] dark:text-[#8bd15a]" />
+                                <h3 class="mt-4 text-lg font-semibold text-zinc-950 dark:text-white">Recurso externo</h3>
                                 <flux:button
                                     :href="$currentLesson->external_url"
                                     target="_blank"
@@ -328,27 +455,33 @@ new class extends Component
                                     icon="arrow-top-right-on-square"
                                     class="mt-5"
                                 >
-                                    {{ $currentLesson->type === LessonType::Video ? 'Abrir video' : 'Abrir enlace' }}
+                                    Abrir enlace
                                 </flux:button>
                             </div>
                         @endif
                     </div>
 
                     <div class="flex justify-end border-t border-zinc-200 pt-6 dark:border-zinc-700">
+                        @error('lesson')
+                            <p class="mr-auto text-sm text-red-600 dark:text-red-400">{{ $message }}</p>
+                        @enderror
+
                         @if ($currentProgress?->completed_at)
                             <span class="inline-flex items-center gap-2 rounded-xl bg-[#63b32e]/15 px-4 py-3 font-semibold text-[#3d8d25] dark:text-[#8bd15a]">
                                 <flux:icon name="check-circle" class="size-5" />
                                 Lección completada
                             </span>
                         @else
-                            <flux:button
-                                wire:click="markSelectedLessonComplete"
-                                variant="primary"
-                                icon="check-circle"
-                                data-test="complete-lesson-button"
-                            >
-                                Marcar como completada
-                            </flux:button>
+                            <div class="flex w-full justify-end">
+                                <flux:button
+                                    wire:click="markSelectedLessonComplete"
+                                    variant="primary"
+                                    icon="check-circle"
+                                    data-test="complete-lesson-button"
+                                >
+                                    Marcar como completada
+                                </flux:button>
+                            </div>
                         @endif
                     </div>
                 @endif
@@ -356,3 +489,56 @@ new class extends Component
         </div>
     @endif
 </section>
+
+@script
+<script>
+    window.presentationLesson = (lessonType, resourceUrl) => ({
+        lessonType,
+        resourceUrl,
+        presentationAbortController: null,
+        presentationViewer: null,
+        presentationLoading: lessonType === 'presentation',
+        presentationError: '',
+        currentSlide: 0,
+        slideCount: 0,
+
+        init() {
+            if (this.lessonType === 'presentation') {
+                this.$nextTick(() => this.loadPresentation());
+            }
+        },
+
+        async loadPresentation() {
+            if (! this.resourceUrl || ! this.$refs.presentationContainer) {
+                this.presentationLoading = false;
+                this.presentationError = 'La presentación no está disponible.';
+
+                return;
+            }
+
+            this.presentationAbortController = new AbortController();
+
+            try {
+                this.presentationViewer = await window.openPrivatePresentation(
+                    this.$refs.presentationContainer,
+                    this.resourceUrl,
+                    this.presentationAbortController.signal,
+                    (index) => { this.currentSlide = index },
+                );
+                this.slideCount = this.presentationViewer.slideCount;
+            } catch (error) {
+                if (error?.name !== 'AbortError') {
+                    this.presentationError = error?.message ?? 'No fue posible mostrar la presentación.';
+                }
+            } finally {
+                this.presentationLoading = false;
+            }
+        },
+
+        destroy() {
+            this.presentationAbortController?.abort();
+            this.presentationViewer?.destroy();
+        },
+    });
+</script>
+@endscript

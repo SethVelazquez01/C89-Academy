@@ -22,12 +22,16 @@ test('teams can be created', function () {
 
     Livewire::test('pages::teams.index')
         ->set('name', 'Test Team')
+        ->set('administratorSeats', '4')
+        ->set('collaboratorSeats', '30')
         ->call('createTeam')
         ->assertHasNoErrors();
 
     $this->assertDatabaseHas('teams', [
         'name' => 'Test Team',
         'is_personal' => false,
+        'included_administrator_seats' => 4,
+        'included_collaborator_seats' => 30,
     ]);
 });
 

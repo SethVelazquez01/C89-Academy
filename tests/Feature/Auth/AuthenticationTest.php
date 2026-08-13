@@ -28,6 +28,22 @@ test('users can authenticate using the login screen', function () {
     $this->assertAuthenticated();
 });
 
+test('the platform owner is redirected to the global control dashboard', function () {
+    $owner = User::factory()->platformOwner()->create();
+
+    $response = $this->post(route('login.store'), [
+        'email' => $owner->email,
+        'password' => 'password',
+    ]);
+
+    $response
+        ->assertSessionHasNoErrors()
+        ->assertSessionMissing('url.intended')
+        ->assertRedirect(route('platform.dashboard', absolute: false));
+
+    $this->assertAuthenticatedAs($owner);
+});
+
 test('collaborators ignore a stale intended admin url when logging in', function () {
     $collaborator = User::factory()->create();
     $team = Team::factory()->create();

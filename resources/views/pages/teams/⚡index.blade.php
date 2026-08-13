@@ -25,8 +25,12 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
-new #[Title('Teams')] class extends Component {
+new #[Title('Organizaciones')] class extends Component {
     public string $name = '';
+
+    public string $administratorSeats = '1';
+
+    public string $collaboratorSeats = '1';
 
     public ?int $editingOrganizationId = null;
 
@@ -70,19 +74,30 @@ new #[Title('Teams')] class extends Component {
 
     public string $ownerAdministratorEmail = '';
 
+    public string $ownerAdministratorPassword = '';
+
+    public string $ownerAdministratorPasswordConfirmation = '';
+
     public function createTeam(CreateTeam $createTeam): void
     {
         $validated = $this->validate([
             'name' => ['required', 'string', 'max:255', new TeamName],
+            'administratorSeats' => ['required', 'integer', 'min:1', 'max:100000'],
+            'collaboratorSeats' => ['required', 'integer', 'min:0', 'max:100000'],
         ]);
 
-        $team = $createTeam->handle(Auth::user(), $validated['name']);
+        $team = $createTeam->handle(
+            Auth::user(),
+            $validated['name'],
+            includedAdministratorSeats: (int) $validated['administratorSeats'],
+            includedCollaboratorSeats: (int) $validated['collaboratorSeats'],
+        );
 
         $this->dispatch('close-modal', name: 'create-team');
 
-        $this->reset('name');
+        $this->reset('name', 'administratorSeats', 'collaboratorSeats');
 
-        Flux::toast(variant: 'success', text: __('Team created.'));
+        Flux::toast(variant: 'success', text: 'Empresa creada correctamente.');
 
         $this->redirectRoute('teams.index', navigate: true);
     }
@@ -344,6 +359,8 @@ new #[Title('Teams')] class extends Component {
         $this->viewingOrganizationName = $organization->name;
         $this->ownerAdministratorName = '';
         $this->ownerAdministratorEmail = '';
+        $this->ownerAdministratorPassword = '';
+        $this->ownerAdministratorPasswordConfirmation = '';
         $this->populateViewingOrganization($organization);
 
         Flux::modal('view-platform-organization-members')->show();
@@ -355,11 +372,15 @@ new #[Title('Teams')] class extends Component {
         $validated = $this->validate([
             'ownerAdministratorName' => ['required', 'string', 'max:255'],
             'ownerAdministratorEmail' => ['required', 'string', 'email', 'max:255'],
+            'ownerAdministratorPassword' => ['required', 'string', 'min:8', 'confirmed:ownerAdministratorPasswordConfirmation'],
         ], [
             'ownerAdministratorName.required' => 'El nombre es obligatorio.',
             'ownerAdministratorName.max' => 'El nombre no puede superar 255 caracteres.',
             'ownerAdministratorEmail.required' => 'El correo electrónico es obligatorio.',
             'ownerAdministratorEmail.email' => 'El correo electrónico no tiene un formato válido.',
+            'ownerAdministratorPassword.required' => 'La contraseña es obligatoria.',
+            'ownerAdministratorPassword.min' => 'La contraseña debe tener al menos 8 caracteres.',
+            'ownerAdministratorPassword.confirmed' => 'La confirmación de contraseña no coincide.',
         ]);
 
         $organization = Team::query()
@@ -373,6 +394,7 @@ new #[Title('Teams')] class extends Component {
                 $validated['ownerAdministratorName'],
                 $validated['ownerAdministratorEmail'],
                 TeamRole::Admin->value,
+                $validated['ownerAdministratorPassword'],
             );
         } catch (ValidationException $exception) {
             throw ValidationException::withMessages([
@@ -380,13 +402,18 @@ new #[Title('Teams')] class extends Component {
             ]);
         }
 
-        $this->reset('ownerAdministratorName', 'ownerAdministratorEmail');
+        $this->reset(
+            'ownerAdministratorName',
+            'ownerAdministratorEmail',
+            'ownerAdministratorPassword',
+            'ownerAdministratorPasswordConfirmation',
+        );
         $this->populateViewingOrganization($organization->fresh());
         unset($this->platformOrganizations);
 
         Flux::toast(
             variant: 'success',
-            text: 'Administrador creado. Si la identidad es nueva, recibirá un correo para establecer su contraseña.',
+            text: 'Administrador creado y listo para iniciar sesión.',
         );
     }
 
@@ -527,11 +554,29 @@ new #[Title('Teams')] class extends Component {
 }; ?>
 
 <section class="w-full">
-    @include('partials.settings-heading')
+    @if (Auth::user()->isPlatformOwner())
+        <div class="mb-6 flex flex-col gap-4 border-b border-zinc-200 pb-6 dark:border-zinc-700 md:flex-row md:items-end md:justify-between">
+            <div>
+                <flux:badge color="blue">Administración global</flux:badge>
+                <flux:heading size="xl" level="1" class="mt-3">Organizaciones</flux:heading>
+                <flux:subheading size="lg" class="mt-1">Gestiona empresas, administradores, miembros y solicitudes de cupos desde un solo lugar.</flux:subheading>
+            </div>
+
+            <flux:button :href="route('platform.dashboard')" variant="ghost" icon="arrow-left" wire:navigate>
+                Volver al resumen
+            </flux:button>
+        </div>
+    @else
+        @include('partials.settings-heading')
+    @endif
 
     <flux:heading class="sr-only">{{ __('Teams') }}</flux:heading>
 
-    <x-pages::settings.layout :heading="__('Teams')" :subheading="__('Manage your teams and team memberships')">
+    <x-pages::settings.layout
+        :heading="__('Teams')"
+        :subheading="__('Manage your teams and team memberships')"
+        :full-width="Auth::user()->isPlatformOwner()"
+    >
         @if (Auth::user()->isPlatformOwner())
             <div class="flex items-center justify-end">
                 <flux:button
@@ -540,14 +585,14 @@ new #[Title('Teams')] class extends Component {
                     wire:click="showCreateTeamModal"
                     data-test="teams-new-team-button"
                 >
-                    {{ __('New team') }}
+                    Nueva empresa
                 </flux:button>
             </div>
 
             <div class="mt-6 space-y-3" data-test="platform-organizations">
                 <div>
-                    <flux:heading size="lg">{{ __('Platform organizations') }}</flux:heading>
-                    <flux:text>{{ __('Organizations managed globally without granting the platform owner a membership.') }}</flux:text>
+                    <flux:heading size="lg">Empresas registradas</flux:heading>
+                    <flux:text>Organizaciones gestionadas globalmente sin convertir al Platform Owner en miembro.</flux:text>
                 </div>
 
                 @forelse ($this->platformOrganizations as $organization)
@@ -559,17 +604,17 @@ new #[Title('Teams')] class extends Component {
 
                         <div class="flex items-center gap-2">
                             <flux:badge color="zinc">
-                                {{ trans_choice(':count member|:count members', (int) $organization->getAttribute('members_count'), ['count' => (int) $organization->getAttribute('members_count')]) }}
+                                {{ (int) $organization->getAttribute('members_count') }} {{ (int) $organization->getAttribute('members_count') === 1 ? 'miembro' : 'miembros' }}
                             </flux:badge>
 
                             @if ((int) $organization->getAttribute('administrators_count') > 0)
                                 <flux:badge color="green">
-                                    {{ trans_choice(':count administrator|:count administrators', (int) $organization->getAttribute('administrators_count'), ['count' => (int) $organization->getAttribute('administrators_count')]) }}
+                                    {{ (int) $organization->getAttribute('administrators_count') }} {{ (int) $organization->getAttribute('administrators_count') === 1 ? 'administrador' : 'administradores' }}
                                 </flux:badge>
                             @elseif ((int) $organization->getAttribute('pending_administrator_invitations_count') > 0)
-                                <flux:badge color="amber">{{ __('Administrator pending') }}</flux:badge>
+                                <flux:badge color="amber">Administrador pendiente</flux:badge>
 
-                                <flux:tooltip :content="__('Cancel administrator invitation')">
+                                <flux:tooltip content="Cancelar invitación de administrador">
                                     <flux:button
                                         variant="ghost"
                                         size="sm"
@@ -579,7 +624,7 @@ new #[Title('Teams')] class extends Component {
                                     />
                                 </flux:tooltip>
                             @else
-                                <flux:tooltip :content="__('Assign first administrator')">
+                                <flux:tooltip content="Asignar primer administrador">
                                     <flux:button
                                         variant="ghost"
                                         size="sm"
@@ -600,7 +645,7 @@ new #[Title('Teams')] class extends Component {
                                 />
                             </flux:tooltip>
 
-                            <flux:tooltip :content="__('Edit organization')">
+                            <flux:tooltip content="Editar empresa">
                                 <flux:button
                                     variant="ghost"
                                     size="sm"
@@ -610,7 +655,7 @@ new #[Title('Teams')] class extends Component {
                                 />
                             </flux:tooltip>
 
-                            <flux:tooltip :content="__('Delete organization')">
+                            <flux:tooltip content="Eliminar empresa">
                                 <flux:button
                                     variant="ghost"
                                     size="sm"
@@ -624,7 +669,7 @@ new #[Title('Teams')] class extends Component {
                     </div>
                 @empty
                     <flux:text class="rounded-lg border border-dashed border-zinc-300 py-8 text-center text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-                        {{ __('No organizations have been created yet.') }}
+                        Todavía no hay empresas registradas.
                     </flux:text>
                 @endforelse
             </div>
@@ -697,8 +742,7 @@ new #[Title('Teams')] class extends Component {
                     @endforeach
                 </div>
             @endif
-        @endif
-
+        @else
         <div class="mt-6 space-y-3" data-test="user-team-memberships">
             @forelse ($this->teams as $team)
                 <div class="flex items-center justify-between gap-4 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900" data-test="team-row">
@@ -771,17 +815,25 @@ new #[Title('Teams')] class extends Component {
                 </flux:text>
             @endforelse
         </div>
+        @endif
     </x-pages::settings.layout>
 
     @if (Auth::user()->isPlatformOwner())
-        <flux:modal name="create-team" :show="$errors->has('name')" focusable class="max-w-lg">
+        <flux:modal name="create-team" :show="$errors->hasAny(['name', 'administratorSeats', 'collaboratorSeats'])" focusable class="max-w-2xl">
             <form wire:submit="createTeam" class="space-y-6">
                 <div>
-                    <flux:heading size="lg">{{ __('Create a new team') }}</flux:heading>
-                    <flux:subheading>{{ __('Give your team a name to get started.') }}</flux:subheading>
+                    <flux:heading size="lg">Registrar nueva empresa</flux:heading>
+                    <flux:subheading>Asigna un nombre para comenzar a administrar la organización.</flux:subheading>
                 </div>
 
-                <flux:input wire:model="name" :label="__('Team name')" type="text" required autofocus data-test="create-team-name" />
+                <flux:input wire:model="name" label="Nombre de la empresa" type="text" required autofocus data-test="create-team-name" />
+
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <flux:input wire:model="administratorSeats" type="number" min="1" max="100000" label="Cupos de administradores" required data-test="create-team-administrator-seats" />
+                    <flux:input wire:model="collaboratorSeats" type="number" min="0" max="100000" label="Cupos de colaboradores" required data-test="create-team-collaborator-seats" />
+                </div>
+
+                <flux:text class="text-sm">Estos cupos forman el paquete inicial de la empresa.</flux:text>
 
                 <div class="flex justify-end space-x-2 rtl:space-x-reverse">
                     <flux:modal.close>
@@ -789,7 +841,7 @@ new #[Title('Teams')] class extends Component {
                     </flux:modal.close>
 
                     <flux:button variant="primary" type="submit" data-test="create-team-submit">
-                        {{ __('Create team') }}
+                        Crear empresa
                     </flux:button>
                 </div>
             </form>
@@ -826,9 +878,9 @@ new #[Title('Teams')] class extends Component {
         <flux:modal name="delete-platform-organization" :show="$errors->has('organization')" focusable class="max-w-lg">
             <form wire:submit="deleteOrganization" class="space-y-6">
                 <div>
-                    <flux:heading size="lg">{{ __('Delete organization') }}</flux:heading>
+                    <flux:heading size="lg">Eliminar organización</flux:heading>
                     <flux:subheading>
-                        {{ __('Delete :name? Only empty organizations can be deleted.', ['name' => $deletingOrganizationName]) }}
+                        ¿Eliminar {{ $deletingOrganizationName }}? Solo se permiten organizaciones sin actividad vigente.
                     </flux:subheading>
                 </div>
 
@@ -838,11 +890,11 @@ new #[Title('Teams')] class extends Component {
 
                 <div class="flex justify-end space-x-2 rtl:space-x-reverse">
                     <flux:modal.close>
-                        <flux:button variant="filled">{{ __('Cancel') }}</flux:button>
+                        <flux:button variant="filled">Cancelar</flux:button>
                     </flux:modal.close>
 
                     <flux:button variant="danger" type="submit" data-test="delete-organization-confirm">
-                        {{ __('Delete organization') }}
+                        Eliminar organización
                     </flux:button>
                 </div>
             </form>
@@ -972,7 +1024,7 @@ new #[Title('Teams')] class extends Component {
             </div>
         </flux:modal>
 
-        <flux:modal name="view-platform-organization-members" :show="$errors->hasAny(['ownerAdministratorName', 'ownerAdministratorEmail'])" focusable class="max-w-4xl">
+        <flux:modal name="view-platform-organization-members" :show="$errors->hasAny(['ownerAdministratorName', 'ownerAdministratorEmail', 'ownerAdministratorPassword'])" focusable class="max-w-4xl">
             <div class="space-y-8">
                 <div>
                     <flux:heading size="lg">Usuarios de {{ $viewingOrganizationName }}</flux:heading>
@@ -1036,12 +1088,14 @@ new #[Title('Teams')] class extends Component {
                 <form wire:submit="createOrganizationAdministrator" class="space-y-4 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
                     <div>
                         <div class="font-medium">Crear administrador</div>
-                        <flux:text class="text-sm text-zinc-500">La persona recibirá un enlace para establecer su contraseña si aún no tiene identidad.</flux:text>
+                        <flux:text class="text-sm text-zinc-500">La cuenta quedará lista para iniciar sesión. Una identidad existente conservará su contraseña actual.</flux:text>
                     </div>
 
                     <div class="grid gap-4 sm:grid-cols-2">
                         <flux:input wire:model="ownerAdministratorName" label="Nombre completo" required data-test="owner-administrator-name" />
                         <flux:input wire:model="ownerAdministratorEmail" type="email" label="Correo electrónico" required data-test="owner-administrator-email" />
+                        <flux:input wire:model="ownerAdministratorPassword" type="password" label="Contraseña" viewable required data-test="owner-administrator-password" />
+                        <flux:input wire:model="ownerAdministratorPasswordConfirmation" type="password" label="Confirmar contraseña" viewable required data-test="owner-administrator-password-confirmation" />
                     </div>
 
                     <div class="flex justify-end">

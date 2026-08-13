@@ -5,6 +5,7 @@ use App\Actions\Teams\CreateTeam;
 use App\Actions\Teams\DeleteOrganization;
 use App\Actions\Teams\InviteInitialOrganizationAdministrator;
 use App\Actions\Teams\UpdateOrganization;
+use App\Enums\MembershipStatus;
 use App\Enums\PlatformRole;
 use App\Enums\TeamRole;
 use App\Models\Course;
@@ -335,6 +336,42 @@ test('global organization deletion protects memberships courses and invitations'
 
         expect($organization->fresh())->not->toBeNull();
     }
+});
+
+test('global organization deletion ignores historical records and trashed courses', function () {
+    $platformOwner = User::factory()->platformOwner()->create();
+    $inviter = User::factory()->create();
+    $removedMember = User::factory()->create();
+    $organization = Team::factory()->create();
+    $organization->memberships()->create([
+        'user_id' => $removedMember->id,
+        'role' => TeamRole::Member,
+        'status' => MembershipStatus::Removed,
+    ]);
+    $trashedCourse = Course::factory()->for($organization)->create();
+    $trashedCourse->delete();
+    $acceptedInvitation = TeamInvitation::factory()->create([
+        'team_id' => $organization->id,
+        'invited_by' => $inviter->id,
+        'accepted_at' => now(),
+    ]);
+    $expiredInvitation = TeamInvitation::factory()->create([
+        'team_id' => $organization->id,
+        'invited_by' => $inviter->id,
+        'expires_at' => now()->subMinute(),
+    ]);
+
+    app(DeleteOrganization::class)->handle($platformOwner, $organization);
+
+    $this->assertSoftDeleted('teams', ['id' => $organization->id]);
+    $this->assertSoftDeleted('courses', ['id' => $trashedCourse->id]);
+    $this->assertDatabaseHas('team_invitations', ['id' => $acceptedInvitation->id]);
+    $this->assertDatabaseHas('team_invitations', ['id' => $expiredInvitation->id]);
+    $this->assertDatabaseHas('team_members', [
+        'team_id' => $organization->id,
+        'user_id' => $removedMember->id,
+        'status' => MembershipStatus::Removed->value,
+    ]);
 });
 
 test('regular users cannot delete organizations through the global action or interface', function () {

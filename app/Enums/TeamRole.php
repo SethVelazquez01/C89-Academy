@@ -39,6 +39,7 @@ enum TeamRole: string
                 TeamPermission::RemoveMember,
                 TeamPermission::CreateCourse,
                 TeamPermission::UpdateCourse,
+                TeamPermission::AssignCourse,
                 TeamPermission::PublishCourse,
                 TeamPermission::DeleteCourse,
             ],

@@ -3,6 +3,7 @@
 namespace App\Policies;
 
 use App\Enums\CourseStatus;
+use App\Enums\MembershipStatus;
 use App\Enums\TeamPermission;
 use App\Enums\TeamRole;
 use App\Models\Course;
@@ -42,6 +43,35 @@ class CourseEnrollmentPolicy
             && $user->isCurrentTeam($course->team)
             && $user->belongsToTeam($course->team)
             && $user->teamRole($course->team) === TeamRole::Member;
+    }
+
+    /**
+     * Determine whether an administrator can assign the course to a collaborator.
+     */
+    public function assign(User $user, Course $course, User $collaborator): bool
+    {
+        if ($course->status !== CourseStatus::Published
+            || ! $user->isCurrentTeam($course->team)
+            || ! $user->hasTeamPermission($course->team, TeamPermission::AssignCourse)) {
+            return false;
+        }
+
+        return $collaborator->teamMemberships()
+            ->where('team_id', $course->team_id)
+            ->where('role', TeamRole::Member->value)
+            ->where('status', MembershipStatus::Active->value)
+            ->exists();
+    }
+
+    /**
+     * Determine whether an administrator can cancel an active enrollment.
+     */
+    public function cancel(User $user, CourseEnrollment $courseEnrollment): bool
+    {
+        $course = $courseEnrollment->course;
+
+        return $user->isCurrentTeam($course->team)
+            && $user->hasTeamPermission($course->team, TeamPermission::AssignCourse);
     }
 
     /**

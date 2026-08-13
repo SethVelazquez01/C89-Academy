@@ -3,38 +3,65 @@
     <head>
         @include('partials.head')
     </head>
+    @php
+        $isPlatformOwner = auth()->user()->isPlatformOwner();
+        $homeRoute = $isPlatformOwner ? route('platform.dashboard') : route('dashboard');
+    @endphp
     <body class="min-h-screen bg-white dark:bg-[#041d35]">
         <flux:sidebar sticky collapsible="mobile" class="border-e border-[#174667] bg-[#062b4f] dark:border-[#174667] dark:bg-[#062b4f]">
             <flux:sidebar.header>
-                <x-app-logo :sidebar="true" href="{{ route('dashboard') }}" wire:navigate />
+                <x-app-logo :sidebar="true" href="{{ $homeRoute }}" wire:navigate />
                 <flux:sidebar.collapse class="lg:hidden" />
             </flux:sidebar.header>
 
-            <livewire:team-switcher />
+            @if ($isPlatformOwner)
+                <div class="mx-1 flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-white in-data-flux-sidebar-collapsed-desktop:justify-center in-data-flux-sidebar-collapsed-desktop:px-2">
+                    <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#63b32e] text-white">
+                        <flux:icon name="shield-check" class="size-4" />
+                    </span>
+                    <div class="min-w-0 in-data-flux-sidebar-collapsed-desktop:hidden">
+                        <p class="truncate text-xs font-semibold uppercase tracking-wide text-blue-200">C89 Academy</p>
+                        <p class="truncate text-sm font-semibold">Platform Owner</p>
+                    </div>
+                </div>
+            @else
+                <livewire:team-switcher />
+            @endif
 
             <flux:sidebar.nav>
-                <flux:sidebar.group heading="Academia" class="grid">
-                    <flux:sidebar.item icon="home" :href="route('dashboard')" :current="request()->routeIs('dashboard')" wire:navigate>
-                        Mi aprendizaje
-                    </flux:sidebar.item>
-                </flux:sidebar.group>
-                @can('create', \App\Models\Course::class)
-                    <flux:sidebar.group heading="Administración" class="grid">
-                         <flux:sidebar.item
-                            icon="book-open"
-                            :href="route('admin.courses.index')"
-                            :current="request()->routeIs('admin.courses.*')"
-                            wire:navigate
+                @if ($isPlatformOwner)
+                    <flux:sidebar.group heading="Plataforma" class="grid">
+                        <flux:sidebar.item icon="chart-bar-square" :href="route('platform.dashboard')" :current="request()->routeIs('platform.dashboard')" wire:navigate>
+                            Resumen global
+                        </flux:sidebar.item>
+                        <flux:sidebar.item icon="building-office" :href="route('teams.index')" :current="request()->routeIs('teams.*')" wire:navigate>
+                            Organizaciones
+                        </flux:sidebar.item>
+                    </flux:sidebar.group>
+                @else
+                    <flux:sidebar.group heading="Academia" class="grid">
+                        <flux:sidebar.item icon="home" :href="route('dashboard')" :current="request()->routeIs('dashboard')" wire:navigate>
+                            Mi aprendizaje
+                        </flux:sidebar.item>
+                    </flux:sidebar.group>
+                    @can('create', \App\Models\Course::class)
+                        <flux:sidebar.group heading="Administración" class="grid">
+                            <flux:sidebar.item
+                                icon="book-open"
+                                :href="route('admin.courses.index')"
+                                :current="request()->routeIs('admin.courses.*')"
+                                wire:navigate
                             >
-                        Cursos
-                    </flux:sidebar.item>
-                </flux:sidebar.group>
-                @endcan
+                                Cursos
+                            </flux:sidebar.item>
+                        </flux:sidebar.group>
+                    @endcan
+                @endif
             </flux:sidebar.nav>
 
             <flux:spacer />
 
-            <x-desktop-user-menu class="hidden lg:block" :name="auth()->user()->name" />
+            <x-desktop-user-menu class="hidden lg:block" :name="auth()->user()->name" :show-team="! $isPlatformOwner" />
         </flux:sidebar>
 
         <!-- Mobile User Menu -->
@@ -94,7 +121,9 @@
 
         {{ $slot }}
 
-        <livewire:create-team-modal />
+        @unless ($isPlatformOwner)
+            <livewire:create-team-modal />
+        @endunless
 
         @persist('toast')
             <flux:toast.group>
