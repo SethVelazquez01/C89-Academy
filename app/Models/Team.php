@@ -29,6 +29,8 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $updated_at
  * @property Carbon|null $deleted_at
  * @property-read Collection<int, Course> $courses
+ * @property-read Collection<int, Exam> $exams
+ * @property-read Collection<int, Roadmap> $roadmaps
  * @property-read Collection<int, TeamInvitation> $invitations
  * @property-read Collection<int, Membership> $memberships
  * @property-read Collection<int, SeatIncreaseRequest> $seatIncreaseRequests
@@ -98,6 +100,18 @@ class Team extends Model
     public function courses(): HasMany
     {
         return $this->hasMany(Course::class);
+    }
+
+    /** @return HasMany<Exam, $this> */
+    public function exams(): HasMany
+    {
+        return $this->hasMany(Exam::class);
+    }
+
+    /** @return HasMany<Roadmap, $this> */
+    public function roadmaps(): HasMany
+    {
+        return $this->hasMany(Roadmap::class);
     }
 
     /**

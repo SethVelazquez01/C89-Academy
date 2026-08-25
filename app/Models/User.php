@@ -34,6 +34,10 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Collection<int, Course> $createdCourses
+ * @property-read Collection<int, Exam> $createdExams
+ * @property-read Collection<int, ExamAttempt> $examAttempts
+ * @property-read Collection<int, Roadmap> $createdRoadmaps
+ * @property-read Collection<int, RoadmapAssignment> $roadmapAssignments
  * @property-read Collection<int, CourseEnrollment> $courseEnrollments
  * @property-read Team|null $currentTeam
  * @property-read Collection<int, Team> $ownedTeams
@@ -63,6 +67,30 @@ class User extends Authenticatable implements PasskeyUser
     public function createdCourses(): HasMany
     {
         return $this->hasMany(Course::class, 'created_by');
+    }
+
+    /** @return HasMany<Exam, $this> */
+    public function createdExams(): HasMany
+    {
+        return $this->hasMany(Exam::class, 'created_by');
+    }
+
+    /** @return HasMany<ExamAttempt, $this> */
+    public function examAttempts(): HasMany
+    {
+        return $this->hasMany(ExamAttempt::class);
+    }
+
+    /** @return HasMany<Roadmap, $this> */
+    public function createdRoadmaps(): HasMany
+    {
+        return $this->hasMany(Roadmap::class, 'created_by');
+    }
+
+    /** @return HasMany<RoadmapAssignment, $this> */
+    public function roadmapAssignments(): HasMany
+    {
+        return $this->hasMany(RoadmapAssignment::class);
     }
 
     /**

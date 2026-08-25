@@ -2,6 +2,7 @@
 
 use App\Actions\Courses\AssignCourseToCollaborator;
 use App\Actions\Courses\CancelCourseEnrollment;
+use App\Enums\CourseAccessMode;
 use App\Enums\CourseStatus;
 use App\Enums\EnrollmentStatus;
 use App\Enums\MembershipStatus;
@@ -106,13 +107,15 @@ new class extends Component
             ? CarbonImmutable::parse($validated['dueDate'])->endOfDay()
             : null;
 
-        $assignCourse->handle(
+        $enrollment = $assignCourse->handle(
             $administrator,
             $collaborator,
             $this->courseModel,
             $validated['isRequired'],
             $dueAt,
         );
+
+        $enrollment->update(['roadmap_assignment_id' => null]);
 
         $this->reset('collaboratorId', 'dueDate', 'reassigningEnrollmentId');
         $this->isRequired = true;
@@ -191,6 +194,10 @@ new class extends Component
     @if ($courseModel->status !== CourseStatus::Published)
         <div class="rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-100">
             Publica el curso antes de asignarlo a los colaboradores.
+        </div>
+    @elseif ($courseModel->access_mode === CourseAccessMode::Blocked)
+        <div class="rounded-xl border border-red-200 bg-red-50 p-5 text-red-900 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-100">
+            Este curso está bloqueado. Cambia su acceso a “Sólo con asignación” antes de dar permiso a un colaborador.
         </div>
     @else
         <form wire:submit="assign" class="space-y-5 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">

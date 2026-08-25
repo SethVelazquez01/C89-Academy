@@ -2,6 +2,7 @@
 
 namespace App\Policies;
 
+use App\Enums\CourseAccessMode;
 use App\Enums\CourseStatus;
 use App\Enums\MembershipStatus;
 use App\Enums\TeamPermission;
@@ -40,6 +41,7 @@ class CourseEnrollmentPolicy
     public function create(User $user, Course $course): bool
     {
         return $course->status === CourseStatus::Published
+            && $course->access_mode === CourseAccessMode::Open
             && $user->isCurrentTeam($course->team)
             && $user->belongsToTeam($course->team)
             && $user->teamRole($course->team) === TeamRole::Member;
@@ -51,6 +53,7 @@ class CourseEnrollmentPolicy
     public function assign(User $user, Course $course, User $collaborator): bool
     {
         if ($course->status !== CourseStatus::Published
+            || $course->access_mode === CourseAccessMode::Blocked
             || ! $user->isCurrentTeam($course->team)
             || ! $user->hasTeamPermission($course->team, TeamPermission::AssignCourse)) {
             return false;

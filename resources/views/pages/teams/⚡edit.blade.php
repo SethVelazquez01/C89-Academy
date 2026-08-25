@@ -358,12 +358,17 @@ new class extends Component
     }
 }; ?>
 
-<section class="w-full">
-    @include('partials.settings-heading')
+<section class="mx-auto w-full max-w-7xl space-y-6" data-test="team-main-page">
+    <header class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+            <flux:badge color="blue">Organización actual</flux:badge>
+            <flux:heading size="xl" level="1" class="mt-3">Equipo</flux:heading>
+            <flux:subheading class="mt-1">Administra usuarios, roles, cupos y accesos de {{ $teamData['name'] }}.</flux:subheading>
+        </div>
+        <flux:button :href="route('dashboard')" variant="ghost" icon="arrow-left" wire:navigate>Volver al centro de control</flux:button>
+    </header>
 
-    <flux:heading class="sr-only">{{ __('Teams') }}</flux:heading>
-
-    <x-pages::settings.layout :heading="__('Teams')" :subheading="__('Manage your team settings')">
+    <div class="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 md:p-8">
         <div class="space-y-10">
             <div class="space-y-6">
                 @if ($this->permissions->canUpdateTeam)
@@ -694,7 +699,7 @@ new class extends Component
                 </div>
             @endif
         </div>
-    </x-pages::settings.layout>
+    </div>
 
     @if ($this->permissions->canCreateInvitation)
         <livewire:pages::teams.invite-member-modal :team="$teamModel" />

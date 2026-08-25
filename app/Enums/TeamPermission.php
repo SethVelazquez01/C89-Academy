@@ -20,4 +20,16 @@ enum TeamPermission: string
     case AssignCourse = 'course:assign';
     case PublishCourse = 'course:publish';
     case DeleteCourse = 'course:delete';
+
+    case CreateExam = 'exam:create';
+    case UpdateExam = 'exam:update';
+    case PublishExam = 'exam:publish';
+    case DeleteExam = 'exam:delete';
+    case ReviewExam = 'exam:review';
+
+    case CreateRoadmap = 'roadmap:create';
+    case UpdateRoadmap = 'roadmap:update';
+    case PublishRoadmap = 'roadmap:publish';
+    case AssignRoadmap = 'roadmap:assign';
+    case DeleteRoadmap = 'roadmap:delete';
 }

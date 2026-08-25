@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\CourseAccessMode;
 use App\Enums\CourseStatus;
 use App\Models\Course;
 use App\Models\Team;
@@ -26,6 +27,7 @@ class CourseFactory extends Factory
             'summary' => fake()->sentence(12),
             'description' => fake()->paragraphs(3, true),
             'status' => CourseStatus::Draft,
+            'access_mode' => CourseAccessMode::Open,
             'thumbnail_path' => null,
             'estimated_duration_minutes' => fake()->numberBetween(15, 240),
             'published_at' => null,

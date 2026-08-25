@@ -2,8 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\CourseAccessMode;
 use App\Enums\CourseStatus;
 use App\Enums\EnrollmentStatus;
+use App\Enums\ExamAttemptStatus;
+use App\Enums\ExamStatus;
+use App\Enums\MembershipStatus;
+use App\Enums\OrganizationSeatType;
+use App\Enums\RoadmapAssignmentStatus;
 use App\Enums\TeamRole;
 use App\Models\Course;
 use App\Models\Lesson;
@@ -34,9 +40,61 @@ class DashboardController extends Controller
         Gate::authorize('viewAny', Course::class);
 
         $team = $user->currentTeam;
+        $role = $user->teamRole($team);
+
+        if (! $team->is_personal && $role?->isAtLeast(TeamRole::Admin)) {
+            return view('admin.dashboard', [
+                'activeMembersCount' => $team->memberships()
+                    ->where('status', MembershipStatus::Active)
+                    ->count(),
+                'pendingInvitationsCount' => $team->invitations()
+                    ->whereNull('accepted_at')
+                    ->where(fn ($query) => $query
+                        ->whereNull('expires_at')
+                        ->orWhere('expires_at', '>=', now()))
+                    ->count(),
+                'publishedCoursesCount' => $team->courses()
+                    ->where('status', CourseStatus::Published)
+                    ->count(),
+                'draftCoursesCount' => $team->courses()
+                    ->where('status', CourseStatus::Draft)
+                    ->count(),
+                'publishedExamsCount' => $team->exams()
+                    ->where('status', ExamStatus::Published)
+                    ->count(),
+                'draftExamsCount' => $team->exams()
+                    ->where('status', ExamStatus::Draft)
+                    ->count(),
+                'pendingExamReviewsCount' => $team->exams()
+                    ->whereHas('attempts', fn ($query) => $query->where('status', ExamAttemptStatus::PendingReview))
+                    ->withCount(['attempts as pending_reviews_count' => fn ($query) => $query->where('status', ExamAttemptStatus::PendingReview)])
+                    ->get()
+                    ->sum('pending_reviews_count'),
+                'administratorSeats' => [
+                    'occupied' => $team->occupiedSeats(OrganizationSeatType::Administrator),
+                    'capacity' => $team->seatCapacity(OrganizationSeatType::Administrator),
+                ],
+                'collaboratorSeats' => [
+                    'occupied' => $team->occupiedSeats(OrganizationSeatType::Collaborator),
+                    'capacity' => $team->seatCapacity(OrganizationSeatType::Collaborator),
+                ],
+                'recentCourses' => $team->courses()->latest()->limit(4)->get(),
+                'recentExams' => $team->exams()->withCount('questions')->latest()->limit(4)->get(),
+                'twoFactorEnabled' => $user->two_factor_confirmed_at !== null,
+            ]);
+        }
+
+        $canSelfEnroll = $user->teamRole($team) === TeamRole::Member;
         $availableCourses = $team
             ->courses()
             ->where('status', CourseStatus::Published)
+            ->when($canSelfEnroll, fn ($query) => $query
+                ->where('access_mode', '!=', CourseAccessMode::Blocked)
+                ->where(fn ($accessQuery) => $accessQuery
+                    ->where('access_mode', CourseAccessMode::Open)
+                    ->orWhereHas('enrollments', fn ($enrollmentQuery) => $enrollmentQuery
+                        ->where('user_id', $user->id)
+                        ->whereIn('status', [EnrollmentStatus::Active, EnrollmentStatus::Completed]))))
             ->withCount([
                 'lessons as published_lessons_count' => fn ($query) => $query
                     ->where('lessons.is_published', true)
@@ -45,7 +103,6 @@ class DashboardController extends Controller
             ->latest('published_at')
             ->get();
 
-        $canSelfEnroll = $user->teamRole($team) === TeamRole::Member;
         $enrollments = $canSelfEnroll
             ? $user->courseEnrollments()
                 ->whereHas('course', fn ($query) => $query->where('team_id', $team->id))
@@ -91,6 +148,12 @@ class DashboardController extends Controller
                 ->where('status', EnrollmentStatus::Completed)
                 ->count(),
             'overallProgressPercentage' => $overallProgressPercentage,
+            'roadmapAssignments' => $user->roadmapAssignments()
+                ->where('status', RoadmapAssignmentStatus::Active)
+                ->whereHas('roadmap', fn ($query) => $query->where('team_id', $team->id))
+                ->with(['roadmap' => fn ($query) => $query->withCount('items')])
+                ->latest('assigned_at')
+                ->get(),
         ]);
     }
 }

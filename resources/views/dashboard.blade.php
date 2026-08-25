@@ -80,6 +80,24 @@
             </div>
         </section>
 
+        @if ($roadmapAssignments->isNotEmpty())
+            <section aria-labelledby="roadmaps-title" class="space-y-4">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                    <div><h2 id="roadmaps-title" class="text-xl font-semibold text-zinc-950 dark:text-white">Tus rutas asignadas</h2><p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Sigue los cursos y exámenes en el orden recomendado.</p></div>
+                    <a href="{{ route('roadmaps.index') }}" class="text-sm font-semibold text-[#3d8d25]" wire:navigate>Ver todas</a>
+                </div>
+                <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    @foreach ($roadmapAssignments as $assignment)
+                        <a href="{{ route('roadmaps.show', ['roadmap' => $assignment->roadmap]) }}" class="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:border-[#63b32e] dark:border-zinc-700 dark:bg-zinc-900" wire:navigate>
+                            <div class="flex items-start justify-between gap-3"><flux:badge color="green">Roadmap</flux:badge>@if ($assignment->due_at)<span class="text-xs text-zinc-500">Hasta {{ $assignment->due_at->format('d/m/Y') }}</span>@endif</div>
+                            <h3 class="mt-4 text-lg font-semibold text-zinc-950 dark:text-white">{{ $assignment->roadmap->title }}</h3>
+                            <p class="mt-2 text-sm text-zinc-500">{{ $assignment->roadmap->items_count }} pasos</p>
+                        </a>
+                    @endforeach
+                </div>
+            </section>
+        @endif
+
         <section aria-labelledby="available-courses-title" class="space-y-4">
             <div>
                 <h2 id="available-courses-title" class="text-xl font-semibold text-zinc-950 dark:text-white">Cursos disponibles</h2>

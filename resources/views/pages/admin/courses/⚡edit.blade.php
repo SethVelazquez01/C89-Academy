@@ -1,11 +1,13 @@
 <?php
 
+use App\Enums\CourseAccessMode;
 use App\Enums\CourseStatus;
 use App\Models\Course;
 use App\Models\CourseModule;
 use Flux\Flux;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 use Livewire\Component;
 
 new class extends Component
@@ -19,6 +21,8 @@ new class extends Component
     public string $description = '';
 
     public ?int $estimatedDurationMinutes = null;
+
+    public string $accessMode = CourseAccessMode::Open->value;
 
     public string $moduleTitle = '';
 
@@ -46,6 +50,7 @@ new class extends Component
         $this->summary = $this->courseModel->summary ?? '';
         $this->description = $this->courseModel->description ?? '';
         $this->estimatedDurationMinutes = $this->courseModel->estimated_duration_minutes;
+        $this->accessMode = $this->courseModel->access_mode->value;
     }
 
     public function save(): void
@@ -57,6 +62,7 @@ new class extends Component
             'summary' => ['nullable', 'string', 'max:500'],
             'description' => ['nullable', 'string', 'max:20000'],
             'estimatedDurationMinutes' => ['nullable', 'integer', 'min:1', 'max:10080'],
+            'accessMode' => ['required', Rule::enum(CourseAccessMode::class)],
         ]);
 
         $this->courseModel->update([
@@ -64,6 +70,7 @@ new class extends Component
             'summary' => filled($validated['summary']) ? $validated['summary'] : null,
             'description' => filled($validated['description']) ? $validated['description'] : null,
             'estimated_duration_minutes' => $validated['estimatedDurationMinutes'],
+            'access_mode' => $validated['accessMode'],
         ]);
 
         Flux::toast(variant: 'success', text: 'Curso actualizado correctamente.');
@@ -316,6 +323,12 @@ new class extends Component
             max="10080"
             data-test="course-duration-input"
         />
+
+        <flux:select wire:model="accessMode" label="Acceso para colaboradores" description="Los cursos bloqueados no aparecen en su panel." data-test="course-access-mode">
+            @foreach (CourseAccessMode::cases() as $mode)
+                <flux:select.option :value="$mode->value">{{ $mode->label() }} — {{ $mode->description() }}</flux:select.option>
+            @endforeach
+        </flux:select>
 
         <div class="flex flex-col-reverse gap-3 border-t border-zinc-200 pt-6 dark:border-zinc-700 sm:flex-row sm:justify-end">
             <flux:button :href="route('admin.courses.index')" variant="ghost" wire:navigate>

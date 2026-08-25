@@ -18,6 +18,7 @@ use Illuminate\Support\Carbon;
  * @property int $course_id
  * @property int $user_id
  * @property int|null $assigned_by
+ * @property int|null $roadmap_assignment_id
  * @property bool $is_required
  * @property Carbon|null $due_at
  * @property int|null $last_cancelled_by
@@ -38,6 +39,7 @@ use Illuminate\Support\Carbon;
     'course_id',
     'user_id',
     'assigned_by',
+    'roadmap_assignment_id',
     'is_required',
     'due_at',
     'last_cancelled_by',
@@ -79,6 +81,12 @@ class CourseEnrollment extends Model
     public function assigner(): BelongsTo
     {
         return $this->belongsTo(User::class, 'assigned_by');
+    }
+
+    /** @return BelongsTo<RoadmapAssignment, $this> */
+    public function roadmapAssignment(): BelongsTo
+    {
+        return $this->belongsTo(RoadmapAssignment::class);
     }
 
     /**

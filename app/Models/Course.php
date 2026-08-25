@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\CourseAccessMode;
 use App\Enums\CourseStatus;
 use Database\Factories\CourseFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -9,6 +10,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -24,6 +26,7 @@ use Illuminate\Support\Str;
  * @property string|null $summary
  * @property string|null $description
  * @property CourseStatus $status
+ * @property CourseAccessMode $access_mode
  * @property string|null $thumbnail_path
  * @property int|null $estimated_duration_minutes
  * @property Carbon|null $published_at
@@ -45,6 +48,7 @@ use Illuminate\Support\Str;
     'summary',
     'description',
     'status',
+    'access_mode',
     'thumbnail_path',
     'estimated_duration_minutes',
     'published_at',
@@ -118,6 +122,18 @@ class Course extends Model
         return $this->hasManyThrough(Lesson::class, CourseModule::class);
     }
 
+    /** @return BelongsToMany<Exam, $this> */
+    public function exams(): BelongsToMany
+    {
+        return $this->belongsToMany(Exam::class)->withTimestamps();
+    }
+
+    /** @return HasMany<RoadmapItem, $this> */
+    public function roadmapItems(): HasMany
+    {
+        return $this->hasMany(RoadmapItem::class);
+    }
+
     /**
      * Get the route key for the model.
      */
@@ -156,6 +172,7 @@ class Course extends Model
     {
         return [
             'status' => CourseStatus::class,
+            'access_mode' => CourseAccessMode::class,
             'estimated_duration_minutes' => 'integer',
             'published_at' => 'datetime',
         ];

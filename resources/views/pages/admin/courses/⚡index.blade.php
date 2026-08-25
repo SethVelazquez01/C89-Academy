@@ -131,7 +131,7 @@ new class extends Component
             @endif
         </div>
     @else
-        <div class="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        <div class="grid gap-4 lg:grid-cols-2">
             @foreach ($this->courses as $course)
                 <article class="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900" wire:key="course-{{ $course->id }}">
                     <div class="flex items-start justify-between gap-4">
@@ -147,9 +147,16 @@ new class extends Component
 
                     <flux:heading size="lg" class="mt-4">{{ $course->title }}</flux:heading>
                     <flux:text class="mt-2 line-clamp-2">{{ $course->summary ?? 'Sin resumen' }}</flux:text>
+                    @unless ($showTrash)
+                        <div class="mt-3">
+                            <flux:badge :color="$course->access_mode === \App\Enums\CourseAccessMode::Open ? 'green' : ($course->access_mode === \App\Enums\CourseAccessMode::Assigned ? 'blue' : 'red')">
+                                Acceso: {{ $course->access_mode->label() }}
+                            </flux:badge>
+                        </div>
+                    @endunless
 
-                    <div class="mt-5 flex items-center justify-between gap-4 border-t border-zinc-200 pt-4 dark:border-zinc-700">
-                        <span class="text-sm text-zinc-500 dark:text-zinc-400">
+                    <div class="mt-5 space-y-3 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+                        <span class="block text-sm text-zinc-500 dark:text-zinc-400">
                             {{ $course->estimated_duration_minutes !== null ? $course->estimated_duration_minutes.' minutos' : 'Duración pendiente' }}
                         </span>
                         @if ($showTrash)
@@ -164,7 +171,16 @@ new class extends Component
                                 Restaurar
                             </flux:button>
                         @else
-                            <div class="flex items-center gap-2">
+                            <div class="grid grid-cols-3 gap-2">
+                                <flux:button
+                                    :href="route('admin.courses.exams', ['course' => $course])"
+                                    variant="ghost"
+                                    size="sm"
+                                    icon="clipboard-document-check"
+                                    wire:navigate
+                                >
+                                    Exámenes
+                                </flux:button>
                                 <flux:button
                                     :href="route('admin.courses.assignments', ['course' => $course])"
                                     variant="ghost"

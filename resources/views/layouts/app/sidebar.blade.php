@@ -41,7 +41,21 @@
                 @else
                     <flux:sidebar.group heading="Academia" class="grid">
                         <flux:sidebar.item icon="home" :href="route('dashboard')" :current="request()->routeIs('dashboard')" wire:navigate>
-                            Mi aprendizaje
+                            {{ auth()->user()->teamRole(auth()->user()->currentTeam)?->isAtLeast(\App\Enums\TeamRole::Admin) ? 'Centro de control' : 'Mi aprendizaje' }}
+                        </flux:sidebar.item>
+                        <flux:sidebar.item icon="clipboard-document-check" :href="route('exams.index')" :current="request()->routeIs('exams.*')" wire:navigate>
+                            Exámenes
+                        </flux:sidebar.item>
+                        <flux:sidebar.item icon="map" :href="route('roadmaps.index')" :current="request()->routeIs('roadmaps.*')" wire:navigate>
+                            Mis rutas
+                        </flux:sidebar.item>
+                        <flux:sidebar.item
+                            icon="users"
+                            :href="route('teams.edit', ['team' => auth()->user()->currentTeam])"
+                            :current="request()->routeIs('teams.edit')"
+                            wire:navigate
+                        >
+                            Equipo
                         </flux:sidebar.item>
                     </flux:sidebar.group>
                     @can('create', \App\Models\Course::class)
@@ -53,6 +67,22 @@
                                 wire:navigate
                             >
                                 Cursos
+                            </flux:sidebar.item>
+                            <flux:sidebar.item
+                                icon="clipboard-document-list"
+                                :href="route('admin.exams.index')"
+                                :current="request()->routeIs('admin.exams.*')"
+                                wire:navigate
+                            >
+                                Administrar exámenes
+                            </flux:sidebar.item>
+                            <flux:sidebar.item
+                                icon="map"
+                                :href="route('admin.roadmaps.index')"
+                                :current="request()->routeIs('admin.roadmaps.*')"
+                                wire:navigate
+                            >
+                                Roadmaps
                             </flux:sidebar.item>
                         </flux:sidebar.group>
                     @endcan

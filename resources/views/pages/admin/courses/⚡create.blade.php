@@ -1,10 +1,12 @@
 <?php
 
+use App\Enums\CourseAccessMode;
 use App\Enums\CourseStatus;
 use App\Models\Course;
 use Flux\Flux;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 use Livewire\Component;
 
 new class extends Component
@@ -16,6 +18,8 @@ new class extends Component
     public string $description = '';
 
     public ?int $estimatedDurationMinutes = null;
+
+    public string $accessMode = CourseAccessMode::Open->value;
 
     public function mount(): void
     {
@@ -31,6 +35,7 @@ new class extends Component
             'summary' => ['nullable', 'string', 'max:500'],
             'description' => ['nullable', 'string', 'max:20000'],
             'estimatedDurationMinutes' => ['nullable', 'integer', 'min:1', 'max:10080'],
+            'accessMode' => ['required', Rule::enum(CourseAccessMode::class)],
         ]);
 
         $user = Auth::user();
@@ -45,6 +50,7 @@ new class extends Component
             'summary' => filled($validated['summary']) ? $validated['summary'] : null,
             'description' => filled($validated['description']) ? $validated['description'] : null,
             'estimated_duration_minutes' => $validated['estimatedDurationMinutes'],
+            'access_mode' => $validated['accessMode'],
             'status' => CourseStatus::Draft,
         ]);
 
@@ -85,6 +91,12 @@ new class extends Component
             autofocus
             data-test="course-title-input"
         />
+
+        <flux:select wire:model="accessMode" label="Acceso para colaboradores" description="Define quién puede ver y abrir este curso." data-test="course-access-mode">
+            @foreach (CourseAccessMode::cases() as $mode)
+                <flux:select.option :value="$mode->value">{{ $mode->label() }} — {{ $mode->description() }}</flux:select.option>
+            @endforeach
+        </flux:select>
 
         <flux:textarea
             wire:model="summary"

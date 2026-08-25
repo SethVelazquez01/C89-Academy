@@ -2,7 +2,9 @@
 
 namespace App\Policies;
 
+use App\Enums\CourseAccessMode;
 use App\Enums\CourseStatus;
+use App\Enums\EnrollmentStatus;
 use App\Enums\TeamPermission;
 use App\Models\Course;
 use App\Models\Team;
@@ -29,8 +31,22 @@ class CoursePolicy
             return false;
         }
 
-        return $course->status === CourseStatus::Published
-            || $user->hasTeamPermission($course->team, TeamPermission::UpdateCourse);
+        if ($user->hasTeamPermission($course->team, TeamPermission::UpdateCourse)) {
+            return true;
+        }
+
+        if ($course->status !== CourseStatus::Published || $course->access_mode === CourseAccessMode::Blocked) {
+            return false;
+        }
+
+        if ($course->access_mode === CourseAccessMode::Open) {
+            return true;
+        }
+
+        return $course->enrollments()
+            ->where('user_id', $user->id)
+            ->whereIn('status', [EnrollmentStatus::Active, EnrollmentStatus::Completed])
+            ->exists();
     }
 
     /**
